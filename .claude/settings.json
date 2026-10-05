@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git status *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git add *)",
+      "PowerShell(git commit *)",
+      "PowerShell(git push origin main)",
+      "PowerShell(git log *)",
+      "PowerShell(git show *)",
+      "PowerShell(git ls-remote *)",
+      "PowerShell(git rev-parse *)",
+      "PowerShell(git grep *)",
+      "PowerShell(git remote -v)",
+      "PowerShell(go vet *)",
+      "PowerShell(go build *)",
+      "PowerShell(go test *)",
+      "PowerShell(gofmt -l *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push origin main)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git ls-remote *)",
+      "Bash(git rev-parse *)",
+      "Bash(git grep *)",
+      "Bash(git remote -v)",
+      "Bash(go vet *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(gofmt -l *)"
+    ],
+    "deny": [
+      "PowerShell(git push --force *)",
+      "PowerShell(git push -f *)",
+      "PowerShell(git push * --force*)",
+      "PowerShell(git push * -f*)",
+      "PowerShell(git push * +*)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * +*)"
+    ]
+  }
+}
