@@ -1,0 +1,10 @@
+# לא נכנס לאימג' - סודות, טוקנים, קבצים בנויים וסביבות מקומיות
+.env
+data/
+token*.json
+recovery.json
+*.exe
+*.pickle
+.idea/
+**/.venv/
+**/__pycache__/

@@ -1,0 +1,17 @@
+[
+  {
+    "title": "דוגמה: אימון כוח קצר לכל הגוף",
+    "url": "",
+    "duration_min": 20,
+    "type": "strength",
+    "muscle_group": "full",
+    "intensity": "medium"
+  },
+  {
+    "title": "דוגמה: מוביליטי ומתיחות",
+    "url": "",
+    "duration_min": 15,
+    "type": "mobility",
+    "intensity": "low"
+  }
+]

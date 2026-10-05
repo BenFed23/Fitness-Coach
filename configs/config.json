@@ -1,0 +1,30 @@
+{
+  "workout_keywords": [
+    "אימון",
+    "workout",
+    "training",
+    "ריצה",
+    "run",
+    "gym",
+    "כושר",
+    "cindy"
+  ],
+  "fallback_routines": {
+    "compressed_gym": {
+      "title": "High-Density Gym Strength Session (Supersets)",
+      "url": "",
+      "duration_minutes": 40,
+      "workout_type": "compressed"
+    },
+    "default": {
+      "title": "Tom Holland Spider-Man Routine (Emergency Backup)",
+      "url": "https://www.youtube.com/watch?v=SOaALNxeCZA",
+      "duration_minutes": 20,
+      "workout_type": "home_backup"
+    }
+  },
+  "active_hours_start": 7,
+  "active_hours_end": 22,
+  "calendar_time_zone": "Asia/Jerusalem",
+  "buffer_commute_mins": 15
+}

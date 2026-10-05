@@ -1,0 +1,20 @@
+# Secrets and Google tokens - never commit these
+.env
+token*.json
+oauth_pending.json
+recovery.json
+data/
+
+# GoLand settings (the run configuration holds CLIENT_SECRET)
+.idea/
+
+# Which short workouts were picked recently (rewritten by the agent)
+short_workout_history.json
+
+# Build output and local state
+*.exe
+*.pickle
+
+# Python
+.venv/
+__pycache__/

@@ -1,0 +1,13 @@
+services:
+  fitness-bot:
+    build: .
+    restart: unless-stopped   # עולה מחדש אחרי קריסה או הפעלה מחדש של השרת
+    env_file: .env            # הסודות וההגדרות - ראו .env.example
+    volumes:
+      - ./data:/data          # token_health.json, token_calendar.json, מצב הבוט, היסטוריית האימונים הקצרים
+      - ./configs:/app/configs:ro   # מאגר האימונים הקצרים - עריכה בלי לבנות מחדש
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
