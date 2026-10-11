@@ -41,9 +41,9 @@ func TestPlanRescheduleCascade(t *testing.T) {
 	loc, _ := time.LoadLocation(calendarTimeZone)
 	day := func(d, h int) time.Time { return time.Date(2026, 9, d, h, 0, 0, 0, loc) } // Sep 27 2026 is a Sunday
 	cal := &fakeCalendar{events: []calendarEventJSON{
-		calendarEvent("run", "[RUN] ריצה", day(29, 7), 60),   // Tue - today
-		calendarEvent("a", "[A] רגליים", day(30, 18), 90),    // Wed - in the way
-		calendarEvent("x", "פגישה עם רופא", day(30, 12), 30), // not a workout
+		calendarEvent("run", "[RUN] Easy run", day(29, 7), 60),      // Tue - today
+		calendarEvent("a", "[A] Legs", day(30, 18), 90),             // Wed - in the way
+		calendarEvent("x", "Doctor's appointment", day(30, 12), 30), // not a workout
 	}}
 	client := &http.Client{Transport: cal}
 
@@ -76,11 +76,11 @@ func TestPlanRescheduleSupersedesWhenWeekIsFull(t *testing.T) {
 	loc, _ := time.LoadLocation(calendarTimeZone)
 	at := func(month, d, h int) time.Time { return time.Date(2026, time.Month(month), d, h, 0, 0, 0, loc) }
 	cal := &fakeCalendar{events: []calendarEventJSON{
-		calendarEvent("a-long", "[A] גב ורגליים", at(9, 29, 18), 90), // Tue - today
-		calendarEvent("b1", "[B] חזה", at(9, 30, 18), 60),
-		calendarEvent("run", "[RUN] ריצה", at(10, 1, 7), 45),
-		calendarEvent("a-short", "[A] רגליים קצר", at(10, 2, 10), 45), // Fri - shorter [A]
-		calendarEvent("b2", "[B] כתפיים", at(10, 3, 18), 60),          // Sat - week is full
+		calendarEvent("a-long", "[A] Back and legs", at(9, 29, 18), 90), // Tue - today
+		calendarEvent("b1", "[B] Chest", at(9, 30, 18), 60),
+		calendarEvent("run", "[RUN] Easy run", at(10, 1, 7), 45),
+		calendarEvent("a-short", "[A] Short legs", at(10, 2, 10), 45), // Fri - shorter [A]
+		calendarEvent("b2", "[B] Shoulders", at(10, 3, 18), 60),       // Sat - week is full
 	}}
 	plan, err := planReschedule(&http.Client{Transport: cal}, at(9, 29, 9), nil)
 	if err != nil {
@@ -93,34 +93,34 @@ func TestPlanRescheduleSupersedesWhenWeekIsFull(t *testing.T) {
 	if move.Event.ID != "a-long" || !move.NewStart.Equal(at(10, 2, 10)) || move.NewEnd.Sub(move.NewStart) != 90*time.Minute {
 		t.Errorf("long [A] should take Fri 10:00 and keep 90 minutes, got %+v", move)
 	}
-	if rename.Event.ID != "a-short" || rename.NewSummary != supersededPrefix+"[A] רגליים קצר" {
+	if rename.Event.ID != "a-short" || rename.NewSummary != supersededPrefix+"[A] Short legs" {
 		t.Errorf("short [A] should be marked superseded, got %+v", rename)
 	}
 }
 
 func TestCategorizeWorkout(t *testing.T) {
 	tests := map[string]string{
-		"[A] רגליים גב":        "A",
-		"[run] easy":           "run",
-		"אימון חזה":            "B",
-		"אימון גב":             "A",
-		"אימון רגליים וכתפיים": "A", // the first group word wins
-		"אימון יד אחורית":      "B",
-		"אימון":                "gym",
-		"אימון כוח":            "gym",
-		"ריצה":                 "run",
-		"  ריצה - 5 ק\"מ":      "run",
+		"[A] Legs, back":             "A",
+		"[run] easy":                 "run",
+		"Workout chest":              "B",
+		"Workout back":               "A",
+		"Workout legs and shoulders": "A", // the first group word wins
+		"workout: Triceps & chest":   "B",
+		"Workout":                    "gym",
+		"Workout strength":           "gym",
+		"Run":                        "run",
+		"  run - 5k":                 "run",
 		// Not workouts: the word must open the title, as a whole word.
-		"גבינה ויין":                "",
-		"פגישה על אימון":            "",
-		"אימונים של הילדים":         "",
-		"ריצות בוקר עם חברים":       "",
-		"Brunch":                    "",
-		supersededPrefix + "[A] גב": "",
+		"Backgammon night":            "",
+		"Plan the workout":            "",
+		"Workouts for the kids":       "",
+		"Running club meetup":         "",
+		"Brunch":                      "",
+		supersededPrefix + "[A] Back": "",
 	}
 	for title, want := range tests {
 		got := categorizeWorkout(title)
-		if title == supersededPrefix+"[A] גב" {
+		if title == supersededPrefix+"[A] Back" {
 			if isWorkoutEvent(title) {
 				t.Errorf("a superseded workout must not count as a workout")
 			}

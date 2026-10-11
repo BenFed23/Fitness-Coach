@@ -1,16 +1,16 @@
 """
-שכבת השירותים של האג'נט - כל נקודות החיבור נמצאות כאן.
+The agent's service layer - every integration point lives here.
 
-הבוט (bot.py) מדבר רק עם הפונקציות בקובץ הזה, ולא יודע מאיפה מגיעים הנתונים:
+The bot (bot.py) only talks to the functions in this file and doesn't know where the data comes from:
 
-    get_recovery_data()   <- האג'נט ב-Go (Fitbit דרך Google Health API)
-    get_weather()         <- האג'נט ב-Go (Open-Meteo)
-    decide_workout()      <- ההחלטה של האג'נט + מה שהמשתמש דיווח בצ'אט
-    parse_user_message()  <- הבנת שפה חופשית (TODO: אפשר להחליף ב-LLM)
+    get_recovery_data()   <- the Go agent (Fitbit via the Google Health API)
+    get_weather()         <- the Go agent (Open-Meteo)
+    decide_workout()      <- the agent's verdict + what the user reported in the chat
+    parse_user_message()  <- free-text understanding (TODO: could be replaced by an LLM)
 
-החיבור לאג'נט: מריצים את fitness-agent.exe -json כתהליך וקוראים את ה-JSON.
-אם הוא לא זמין (לא נבנה, אין טוקן, אין אינטרנט) - הבוט עובר לנתוני דמה
-ומציין את זה בהודעות.
+Talking to the agent: run fitness-agent.exe -json as a subprocess and read its JSON.
+If it isn't available (not built, no token, no internet) the bot falls back to mock
+data and says so in its messages.
 """
 
 from __future__ import annotations
@@ -27,22 +27,22 @@ from pathlib import Path
 
 log = logging.getLogger("fitness-bot.services")
 
-# תיקיית הפרויקט (שם נמצאים token_health.json וה-exe) - אחת מעל telegram_bot
+# The project folder (where token_health.json and the exe live) - one above telegram_bot
 AGENT_DIR = Path(os.getenv("FITNESS_AGENT_DIR", Path(__file__).resolve().parent.parent))
 AGENT_BIN = Path(os.getenv("FITNESS_AGENT_BIN", AGENT_DIR / "fitness-agent.exe"))
 AGENT_TIMEOUT_SECONDS = 90
-# כמה זמן לשמור תוצאה לפני הרצה חוזרת - נתוני הצמיד לא משתנים כל דקה
+# How long to keep a result before running the agent again - tracker data doesn't change every minute
 AGENT_CACHE_SECONDS = 10 * 60
 
 
 # ---------------------------------------------------------------------------
-# מודלי נתונים
+# Data models
 # ---------------------------------------------------------------------------
 
 @dataclass
 class RecoveryData:
-    """מדדי ההתאוששות של הלילה האחרון. None = אין נתון."""
-    readiness_score: int | None      # 1-100, הערכה בסגנון ה-Readiness של Fitbit
+    """Last night's recovery metrics. None = no reading."""
+    readiness_score: int | None      # 1-100, an estimate in the style of Fitbit's Readiness
     sleep_hours: float | None
     resting_hr: int | None
     rhr_baseline: int | None
@@ -54,8 +54,8 @@ class RecoveryData:
     tracker_not_worn: bool = False
     respiratory_rate: float | None = None
     skin_temp_delta_c: float | None = None
-    # ההחלטה של האג'נט ב-Go: go / adjust_for_weather / light /
-    # skip_weather / skip_recovery. None = אין אג'נט (נתוני דמה).
+    # The Go agent's verdict: go / adjust_for_weather / light /
+    # skip_weather / skip_recovery. None = no agent (mock data).
     agent_verdict: str | None = None
     agent_has_recovery_data: bool = False
     warnings: list[str] = field(default_factory=list)
@@ -73,24 +73,24 @@ class Weather:
 @dataclass
 class UserContext:
     """
-    מה שהמשתמש סיפר לבוט היום. מתאפס אוטומטית ביום חדש.
-    הערכים כאן גוברים על נתוני הצמיד (למשל שעות שינה שדווחו ידנית).
+    What the user told the bot today. Resets automatically on a new day.
+    These values override the tracker (e.g. sleep hours reported by hand).
     """
     day: date = field(default_factory=date.today)
     reported_sleep_hours: float | None = None
-    injuries: list[str] = field(default_factory=list)   # למשל ["ברך"]
+    injuries: list[str] = field(default_factory=list)   # e.g. ["knee"]
     feeling_exhausted: bool = False
     feeling_sick: bool = False
-    notes: list[str] = field(default_factory=list)      # הודעות שלא זוהו
+    notes: list[str] = field(default_factory=list)      # messages that weren't understood
 
     def reset_if_new_day(self) -> None:
         if self.day != date.today():
-            self.__init__()  # מתחילים יום חדש נקי
+            self.__init__()  # start the new day clean
 
 
 @dataclass
 class UserUpdate:
-    """מה שחולץ מהודעה חופשית אחת."""
+    """What was extracted from one free-text message."""
     sleep_hours: float | None = None
     injury: str | None = None
     exhausted: bool = False
@@ -107,26 +107,26 @@ class WorkoutPlan:
     level: str            # "full" / "light" / "rest"
     title: str
     details: list[str]
-    reasons: list[str]    # למה זו ההחלטה - מוצג למשתמש
+    reasons: list[str]    # why this is the decision - shown to the user
 
 
 # ---------------------------------------------------------------------------
-# החיבור לאג'נט ב-Go
+# Talking to the Go agent
 # ---------------------------------------------------------------------------
 
-# תוצאות אחרונות לפי הדגל exhausted: {exhausted: (time, snapshot)}
+# Latest results per exhausted flag: {exhausted: (time, snapshot)}
 _snapshot_cache: dict[bool, tuple[float, dict]] = {}
-# מונע כמה הרצות במקביל כשכמה הודעות מגיעות יחד
+# Prevents several parallel runs when a few messages arrive together
 _agent_lock = asyncio.Lock()
-# הסיבה לכישלון האחרון של האג'נט (למשל טוקן שפג) - כדי שהבוט יוכל להציג אותה
+# Why the agent last failed (e.g. an expired token) - so the bot can show it
 last_agent_error: str | None = None
 
 
 async def _run_agent(*flags: str) -> dict | None:
-    """מריץ את האג'נט עם -json והדגלים הנוספים ומחזיר את ה-JSON, או None אם נכשל."""
+    """Runs the agent with -json and the extra flags and returns its JSON, or None on failure."""
     global last_agent_error
     if not AGENT_BIN.exists():
-        last_agent_error = f"קובץ האג'נט לא נמצא ({AGENT_BIN.name}) - צריך לבנות אותו"
+        last_agent_error = f"agent binary not found ({AGENT_BIN.name}) - it needs to be built"
         log.warning("Agent binary not found at %s - run: go build -o fitness-agent.exe ./cmd/agent", AGENT_BIN)
         return None
     try:
@@ -136,7 +136,7 @@ async def _run_agent(*flags: str) -> dict | None:
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), AGENT_TIMEOUT_SECONDS)
     except (OSError, asyncio.TimeoutError) as err:
-        last_agent_error = f"הרצת האג'נט נכשלה ({err!r})"
+        last_agent_error = f"running the agent failed ({err!r})"
         log.error("Running the agent failed: %r", err)
         return None
     if proc.returncode != 0:
@@ -147,7 +147,7 @@ async def _run_agent(*flags: str) -> dict | None:
     try:
         result = json.loads(stdout)
     except json.JSONDecodeError as err:
-        last_agent_error = "האג'נט החזיר פלט לא תקין"
+        last_agent_error = "the agent returned invalid output"
         log.error("Agent returned invalid JSON: %s", err)
         return None
     last_agent_error = None
@@ -155,7 +155,7 @@ async def _run_agent(*flags: str) -> dict | None:
 
 
 async def get_agent_snapshot(ctx: UserContext | None = None) -> dict | None:
-    """תוצאת האג'נט, עם מטמון קצר. מעביר לו את העייפות שדווחה בצ'אט."""
+    """The agent's result, with a short cache. Passes on fatigue reported in the chat."""
     exhausted = bool(ctx and ctx.feeling_exhausted)
     async with _agent_lock:
         cached = _snapshot_cache.get(exhausted)
@@ -169,17 +169,17 @@ async def get_agent_snapshot(ctx: UserContext | None = None) -> dict | None:
 
 
 def clear_agent_cache() -> None:
-    """למשל אחרי שהמשתמש סנכרן את הצמיד ורוצה נתונים טריים."""
+    """E.g. after the user synced the tracker and wants fresh data."""
     _snapshot_cache.clear()
 
 
 # ---------------------------------------------------------------------------
-# תוקף הטוקנים של גוגל
+# Google token expiry
 # ---------------------------------------------------------------------------
 
-# כל עוד אפליקציית ה-OAuth במצב Testing, גוגל מבטלת כל טוקן 7 ימים אחרי האישור
-# בדפדפן. האג'נט שומר את זמן האישור בקובץ הטוקן (authorized_at).
-# 0 = לא לחשב תפוגה (למשל אחרי מעבר ל-In production).
+# While the OAuth app is in Testing, Google revokes every token 7 days after it
+# was approved in the browser. The agent stores the approval time in the token
+# file (authorized_at). 0 = don't compute expiry (e.g. after moving to In production).
 GOOGLE_TOKEN_MAX_AGE_DAYS = int(os.getenv("GOOGLE_TOKEN_MAX_AGE_DAYS", "7"))
 TOKEN_WARN_BEFORE = timedelta(hours=24)
 
@@ -187,19 +187,19 @@ TOKEN_WARN_BEFORE = timedelta(hours=24)
 @dataclass
 class TokenStatus:
     key: str             # health / calendar
-    label: str           # לתצוגה
+    label: str           # for display
     filename: str
-    renew_command: str   # הפקודה שיוצרת אותו מחדש (במחשב, עם דפדפן)
+    renew_command: str   # the command that creates it again (on a computer, with a browser)
     state: str           # ok / expiring / expired / missing / unknown
     authorized_at: datetime | None = None
     expires_at: datetime | None = None
 
 
 _TOKENS = [
-    ("health", "נתוני הצמיד (Google Health)", "token_health.json", r".\fitness-agent.exe"),
-    ("calendar", "יומן גוגל", "token_calendar.json", r".\fitness-agent.exe -move-today -dry-run"),
+    ("health", "tracker data (Google Health)", "token_health.json", r".\fitness-agent.exe"),
+    ("calendar", "Google Calendar", "token_calendar.json", r".\fitness-agent.exe -move-today -dry-run"),
 ]
-# טוקנים שגוגל דחתה לפי הדיווח של האג'נט (auth_error) - גוברים על החישוב לפי תאריך
+# Tokens Google rejected according to the agent (auth_error) - override the date-based estimate
 _rejected_tokens: set[str] = set()
 
 
@@ -216,29 +216,29 @@ def token_label(key: str) -> str:
 
 async def start_token_renewal(key: str) -> dict:
     """
-    שלב 1 של חידוש מהטלפון: האג'נט מחזיר קישור לאישור בגוגל ({"ok", "url"}).
-    אחרי האישור הדפדפן עובר לכתובת localhost שלא נטענת - את הכתובת הזו
-    המשתמש מדביק, ו-finish_token_renewal משלים.
+    Step 1 of renewing from the phone: the agent returns a Google approval link ({"ok", "url"}).
+    After approval the browser lands on a localhost address that doesn't load - the user
+    pastes that address, and finish_token_renewal completes the renewal.
     """
     result = await _run_agent("-auth", key)
     if result is None:
-        return {"ok": False, "error": last_agent_error or "האג'נט לא זמין"}
+        return {"ok": False, "error": last_agent_error or "the agent isn't available"}
     return result
 
 
 async def finish_token_renewal(key: str, pasted_address: str) -> dict:
-    """שלב 2: מעביר לאג'נט את הכתובת שהודבקה; הוא בודק אותה ושומר טוקן חדש."""
+    """Step 2: passes the pasted address to the agent, which checks it and saves a new token."""
     result = await _run_agent("-auth", key, "-auth-code", pasted_address.strip())
     if result is None:
-        return {"ok": False, "error": last_agent_error or "האג'נט לא זמין"}
+        return {"ok": False, "error": last_agent_error or "the agent isn't available"}
     if result.get("ok"):
         _mark_token(key, False)
-        clear_agent_cache()  # הנתונים הבאים כבר עם הטוקן החדש
+        clear_agent_cache()  # the next data already uses the new token
     return result
 
 
 def token_statuses(now: datetime | None = None) -> list[TokenStatus]:
-    """מצב כל טוקן לפי הקובץ שלו (authorized_at) ולפי מה שהאג'נט דיווח."""
+    """The state of each token, from its file (authorized_at) and from what the agent reported."""
     now = now or datetime.now().astimezone()
     statuses = []
     for key, label, filename, renew in _TOKENS:
@@ -268,14 +268,14 @@ def token_statuses(now: datetime | None = None) -> list[TokenStatus]:
 
 async def move_todays_workout(dry_run: bool) -> dict:
     """
-    מזיז את האימון של היום ביומן גוגל (בלי קשר להמלצה).
-    dry_run=True - רק מחזיר מה ישתנה, בלי לגעת ביומן.
-    מחזיר את ה-JSON של האג'נט: ok, error, workout, changes[{summary, from, to, new_summary}].
+    Moves today's workout on Google Calendar (regardless of the recommendation).
+    dry_run=True - only returns what would change, without touching the calendar.
+    Returns the agent's JSON: ok, error, workout, changes[{summary, from, to, new_summary}].
     """
     flags = ["-move-today"] + (["-dry-run"] if dry_run else [])
     result = await _run_agent(*flags)
     if result is None:
-        return {"ok": False, "error": last_agent_error or "האג'נט לא זמין", "changes": []}
+        return {"ok": False, "error": last_agent_error or "the agent isn't available", "changes": []}
     _mark_token("calendar", bool(result.get("auth_error")))
     return result
 
@@ -285,11 +285,11 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 # ---------------------------------------------------------------------------
-# נקודות חיבור לנתונים
+# Data integration points
 # ---------------------------------------------------------------------------
 
 async def get_recovery_data(ctx: UserContext | None = None) -> RecoveryData:
-    """מדדי הצמיד מהאג'נט. אם הוא לא זמין - נתוני דמה (source="mock")."""
+    """Tracker metrics from the agent. If it isn't available - mock data (source="mock")."""
     snapshot = await get_agent_snapshot(ctx)
     if snapshot is None:
         return RecoveryData(readiness_score=72, sleep_hours=6.8, resting_hr=47, rhr_baseline=45, hrv_ms=81.0)
@@ -315,7 +315,7 @@ async def get_recovery_data(ctx: UserContext | None = None) -> RecoveryData:
 
 
 async def get_weather(ctx: UserContext | None = None) -> Weather:
-    """מזג האוויר מהאג'נט (Open-Meteo לפי המיקום). אם הוא לא זמין - נתוני דמה."""
+    """The weather from the agent (Open-Meteo for the location). If it isn't available - mock data."""
     snapshot = await get_agent_snapshot(ctx)
     if snapshot is None:
         return Weather(temperature_c=26.5, humidity_pct=60, rain_mm=0, wind_kmh=10)
@@ -324,46 +324,43 @@ async def get_weather(ctx: UserContext | None = None) -> Weather:
 
 
 # ---------------------------------------------------------------------------
-# הבנת הודעות חופשיות
+# Understanding free-text messages
 # ---------------------------------------------------------------------------
 
-# איברים שמזוהים בהודעות על כאב/פציעה (מילה בהודעה -> שם לתצוגה)
+# Body parts recognized in messages about pain/injury (word in the message -> display name)
 _BODY_PARTS = {
-    "ברך": "ברך", "ברכיים": "ברך", "knee": "ברך",
-    "גב": "גב", "back": "גב",
-    "כתף": "כתף", "shoulder": "כתף",
-    "קרסול": "קרסול", "ankle": "קרסול",
-    "מרפק": "מרפק", "elbow": "מרפק",
-    "שורש כף היד": "שורש כף היד", "wrist": "שורש כף היד",
-    "צוואר": "צוואר", "neck": "צוואר",
-    "ירך": "ירך", "hip": "ירך",
+    "knee": "knee", "knees": "knee",
+    "back": "back",
+    "shoulder": "shoulder", "shoulders": "shoulder",
+    "ankle": "ankle", "ankles": "ankle",
+    "elbow": "elbow",
+    "wrist": "wrist",
+    "neck": "neck",
+    "hip": "hip", "hips": "hip",
 }
-_PAIN_WORDS = ("כאב", "כואב", "כואבת", "נפצעתי", "פציעה", "נקע", "pain", "hurt", "injur")
-_EXHAUSTED_WORDS = ("עייף", "עייפה", "מותש", "מותשת", "גמור", "גמורה", "tired", "exhausted")
-_SICK_WORDS = ("חולה", "חום", "מצונן", "מצוננת", "שפעת", "sick", "fever", "flu")
-_GOOD_WORDS = ("מרגיש מצוין", "מרגישה מצוין", "מרגיש טוב", "מרגישה טוב", "feel great", "feel good")
+NO_BODY_PART = "unspecified"
+_PAIN_WORDS = ("pain", "hurt", "injur", "sore", "sprain", "ache")
+_EXHAUSTED_WORDS = ("tired", "exhausted", "wiped out", "worn out", "drained")
+_SICK_WORDS = ("sick", "fever", "flu", "have a cold", "caught a cold")
+_GOOD_WORDS = ("feel great", "feel good", "feeling great", "feeling good")
 
 _SLEEP_RE = re.compile(
-    r"(?:ישנתי|שינה|נרדמתי|slept|sleep)\D{0,15}?(\d+(?:[.,]\d+)?)\s*(?:שעות|שעה|h|hours?)?",
+    r"(?:slept|sleep|asleep)\D{0,15}?(\d+(?:[.,]\d+)?)\s*(?:h|hours?|hrs?)?",
     re.IGNORECASE,
 )
 
 
 def _contains_word(text: str, word: str) -> bool:
-    """
-    מחפש מילה שלמה, כולל אות שימוש אחת לפניה ("בברך", "הגב").
-    כך "גב" לא יתאים בטעות ל"גבוה".
-    """
-    pattern = rf"(?<![א-תa-z])[בהלמו]?{re.escape(word)}(?![א-תa-z])"
-    return re.search(pattern, text) is not None
+    """Looks for a whole word, so "back" doesn't match "backpack"."""
+    return re.search(rf"\b{re.escape(word)}\b", text) is not None
 
 
 async def parse_user_message(text: str) -> UserUpdate:
     """
-    הבנה בסיסית מבוססת מילות מפתח (עברית ואנגלית).
+    Basic keyword-based understanding.
 
-    TODO: להחליף במודל שפה (LLM) לתוצאות טובות יותר - לבקש ממנו להחזיר
-    JSON באותו מבנה של UserUpdate. חתימת הפונקציה נשארת זהה.
+    TODO: replace with a language model (LLM) for better results - ask it to return
+    JSON in the same shape as UserUpdate. The function signature stays the same.
     """
     lowered = text.lower()
     update = UserUpdate()
@@ -377,7 +374,7 @@ async def parse_user_message(text: str) -> UserUpdate:
     if any(word in lowered for word in _PAIN_WORDS):
         update.injury = next(
             (name for word, name in _BODY_PARTS.items() if _contains_word(lowered, word)),
-            "לא צוין",
+            NO_BODY_PART,
         )
 
     update.exhausted = any(word in lowered for word in _EXHAUSTED_WORDS)
@@ -387,7 +384,7 @@ async def parse_user_message(text: str) -> UserUpdate:
 
 
 def apply_update(ctx: UserContext, update: UserUpdate, original_text: str) -> None:
-    """מעדכן את הקשר השיחה לפי מה שזוהה בהודעה."""
+    """Updates the conversation context with what was recognized in the message."""
     if update.sleep_hours is not None:
         ctx.reported_sleep_hours = update.sleep_hours
     if update.injury and update.injury not in ctx.injuries:
@@ -403,16 +400,16 @@ def apply_update(ctx: UserContext, update: UserUpdate, original_text: str) -> No
 
 
 # ---------------------------------------------------------------------------
-# החלטה על האימון
+# Deciding on the workout
 # ---------------------------------------------------------------------------
 
 async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserContext) -> WorkoutPlan:
     """
-    ההחלטה על האימון:
-      1. הבסיס הוא ההחלטה של האג'נט ב-Go (Readiness, HRV, שינה, דופק, מזג אוויר).
-         בלי אג'נט (נתוני דמה) - כללים פשוטים עם אותם ספים.
-      2. מעל זה - מה שהמשתמש דיווח בצ'אט (שינה, מחלה, עייפות, כאבים).
-    ההחלטה יכולה רק להחמיר: הכי מגביל מבין כל הסיבות קובע.
+    The workout decision:
+      1. The base is the Go agent's verdict (readiness, HRV, sleep, heart rate, weather).
+         Without the agent (mock data) - simple rules with the same thresholds.
+      2. On top of that - what the user reported in the chat (sleep, illness, fatigue, pain).
+    The decision can only get stricter: the most restrictive reason wins.
     """
     reasons: list[str] = []
     level = "full"
@@ -427,68 +424,70 @@ async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserCont
     outdoor_ok = weather.rain_mm < 2 and 5 <= weather.temperature_c <= 30 and weather.wind_kmh < 30
 
     if recovery.agent_verdict is not None:
-        # --- 1. ההחלטה של האג'נט ---
+        # --- 1. The agent's verdict ---
         readiness = ""
         if recovery.readiness_score is not None:
-            readiness = f" ציון התאוששות {recovery.readiness_score}"
+            readiness = f" Readiness score {recovery.readiness_score}"
             if recovery.readiness_breakdown:
                 readiness += f" ({recovery.readiness_breakdown})"
             readiness += "."
-        # בלי נתוני צמיד, "light" של האג'נט נובע רק מהעייפות שדווחה - והיא מטופלת בסעיף 2
+        # Without tracker data, the agent's "light" comes only from reported fatigue - handled in step 2
         match recovery.agent_verdict:
             case "skip_recovery" if recovery.agent_has_recovery_data:
-                lower_to("rest", "מדדי ההתאוששות מהצמיד באדום." + readiness)
+                lower_to("rest", "Your tracker's recovery metrics are in the red." + readiness)
             case "light" if recovery.agent_has_recovery_data:
-                lower_to("light", "ההתאוששות לפי הצמיד לא מלאה." + readiness)
+                lower_to("light", "Your tracker says you haven't fully recovered." + readiness)
             case "skip_weather":
                 outdoor_ok = False
             case "adjust_for_weather":
-                reasons.append("מזג האוויר לא אידיאלי - להתאים קצב, ביגוד ושתייה.")
+                reasons.append("The weather isn't ideal - adjust pace, clothing and hydration.")
         if recovery.tracker_not_worn:
-            reasons.append("הצמיד לא נענד בלילה - אין נתוני התאוששות, ההחלטה בלי מדדי שינה/דופק.")
+            reasons.append("The tracker wasn't worn overnight - no recovery data, so this ignores sleep and heart rate.")
         elif recovery.agent_verdict in ("go", "adjust_for_weather", "skip_weather") and recovery.agent_has_recovery_data:
-            reasons.append("מדדי ההתאוששות מהצמיד תקינים." + readiness)
-        device_sleep = None  # השינה מהצמיד כבר נכללה בהחלטת האג'נט
+            reasons.append("Your tracker's recovery metrics look fine." + readiness)
+        device_sleep = None  # the tracker's sleep is already part of the agent's verdict
     else:
-        # --- 1. בלי אג'נט: כללים פשוטים על נתוני הדמה ---
+        # --- 1. No agent: simple rules on the mock data ---
         if recovery.readiness_score is not None:
             if recovery.readiness_score < 30:
-                lower_to("rest", f"ציון התאוששות נמוך ({recovery.readiness_score}).")
+                lower_to("rest", f"Low readiness score ({recovery.readiness_score}).")
             elif recovery.readiness_score < 65:
-                lower_to("light", f"ציון התאוששות בינוני ({recovery.readiness_score}).")
+                lower_to("light", f"Moderate readiness score ({recovery.readiness_score}).")
         if recovery.resting_hr and recovery.rhr_baseline and recovery.resting_hr - recovery.rhr_baseline >= 10:
-            lower_to("rest", f"דופק המנוחה גבוה ב-{recovery.resting_hr - recovery.rhr_baseline} מהבסיס שלך.")
+            lower_to("rest", f"Resting heart rate is {recovery.resting_hr - recovery.rhr_baseline} above your baseline.")
         device_sleep = recovery.sleep_hours
 
-    # --- 2. מה שהמשתמש דיווח (גובר על הצמיד) ---
+    # --- 2. What the user reported (overrides the tracker) ---
     sleep = ctx.reported_sleep_hours if ctx.reported_sleep_hours is not None else device_sleep
     if sleep is not None:
         if sleep < 4:
-            lower_to("rest", f"ישנת רק {sleep:g} שעות - סיכון גבוה לפציעה.")
+            lower_to("rest", f"You only slept {sleep:g} hours - high injury risk.")
         elif sleep < 6:
-            lower_to("light", f"ישנת {sleep:g} שעות - ההתאוששות חלקית.")
+            lower_to("light", f"You slept {sleep:g} hours - recovery is partial.")
     if ctx.feeling_sick:
-        lower_to("rest", "דיווחת שאתה חולה - הגוף צריך מנוחה.")
+        lower_to("rest", "You said you're sick - your body needs rest.")
     if ctx.feeling_exhausted:
-        lower_to("light", "דיווחת על עייפות.")
+        lower_to("light", "You reported feeling tired.")
     for injury in ctx.injuries:
-        lower_to("light", f"כאב ב{injury} - להימנע מעומס על האזור.")
+        lower_to("light", f"Pain in your {injury} - avoid loading that area.")
 
     if not outdoor_ok:
-        reasons.append("מזג האוויר לא מתאים לאימון בחוץ - עדיף בפנים.")
+        reasons.append("The weather isn't right for training outside - better indoors.")
 
     if level == "rest":
-        return WorkoutPlan("rest", "יום מנוחה 🛌",
-                           ["הליכה קלה של 20-30 דקות (לא חובה)", "מתיחות ונשימות 10 דקות", "שתייה ושינה מוקדמת"],
+        return WorkoutPlan("rest", "Rest day 🛌",
+                           ["Easy 20-30 minute walk (optional)", "10 minutes of stretching and breathing",
+                            "Hydrate and get to bed early"],
                            reasons)
     if level == "light":
-        details = ["חימום 10 דקות", "אימון קל 25-30 דקות בדופק נמוך (אזור 2)", "מתיחות 10 דקות"]
+        details = ["10-minute warm-up", "Easy 25-30 minute session at a low heart rate (zone 2)",
+                   "10 minutes of stretching"]
         if ctx.injuries:
-            details.insert(1, "לדלג על תרגילים שמעמיסים על: " + ", ".join(ctx.injuries))
-        return WorkoutPlan("light", "אימון קל 🚶", details, reasons)
+            details.insert(1, "Skip exercises that load: " + ", ".join(ctx.injuries))
+        return WorkoutPlan("light", "Light workout 🚶", details, reasons)
 
-    where = "בחוץ" if outdoor_ok else "בחדר כושר / בבית"
-    return WorkoutPlan("full", f"אימון מלא {where} 💪",
-                       ["חימום 10 דקות", "אימון עיקרי 40-45 דקות לפי התוכנית", "שחרור ומתיחות 10 דקות"],
-                       reasons or ["ההתאוששות ומזג האוויר תקינים." if recovery.agent_verdict is None
-                                   else "מזג האוויר תקין."])
+    where = "outside" if outdoor_ok else "at the gym / at home"
+    return WorkoutPlan("full", f"Full workout {where} 💪",
+                       ["10-minute warm-up", "40-45 minute main session as planned", "10-minute cool-down and stretching"],
+                       reasons or ["Recovery and weather both look good." if recovery.agent_verdict is None
+                                   else "The weather is fine."])

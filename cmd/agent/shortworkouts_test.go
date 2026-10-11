@@ -38,24 +38,24 @@ func TestSelectShortWorkout(t *testing.T) {
 		readiness *int
 		want      string
 	}{
-		{"same type, longest that fits", library, nil, workoutEvent("אימון גב", 60), &good, "strength-30-high"},
-		{"only shorter than the original", library, nil, workoutEvent("אימון גב", 25), &good, "strength-20"},
+		{"same type, longest that fits", library, nil, workoutEvent("Workout back", 60), &good, "strength-30-high"},
+		{"only shorter than the original", library, nil, workoutEvent("Workout back", 25), &good, "strength-20"},
 		// run-25 is as long as the run itself, so no run is left: any type.
-		{"equal length doesn't count", library, nil, workoutEvent("ריצה", 25), &good, "strength-20"},
-		{"run maps to run", library, nil, workoutEvent("ריצה", 45), &good, "run-25"},
-		{"no same type: any type, longest", []shortWorkout{library[3], library[4]}, nil, workoutEvent("[A] רגליים", 60), &good, "hiit-40"},
-		{"low readiness: no high intensity", library, nil, workoutEvent("אימון חזה", 60), &low, "strength-20"},
-		{"no readiness: no high intensity", library, nil, workoutEvent("אימון חזה", 60), nil, "strength-20"},
-		{"readiness exactly 50 allows high", library, nil, workoutEvent("אימון חזה", 60), &threshold, "strength-30-high"},
+		{"equal length doesn't count", library, nil, workoutEvent("Run", 25), &good, "strength-20"},
+		{"run maps to run", library, nil, workoutEvent("Run", 45), &good, "run-25"},
+		{"no same type: any type, longest", []shortWorkout{library[3], library[4]}, nil, workoutEvent("[A] Legs", 60), &good, "hiit-40"},
+		{"low readiness: no high intensity", library, nil, workoutEvent("Workout chest", 60), &low, "strength-20"},
+		{"no readiness: no high intensity", library, nil, workoutEvent("Workout chest", 60), nil, "strength-20"},
+		{"readiness exactly 50 allows high", library, nil, workoutEvent("Workout chest", 60), &threshold, "strength-30-high"},
 		{"picked 6 days ago is skipped", library,
 			[]shortWorkoutPick{{URL: library[1].URL, PickedAt: testNow.Add(-6 * 24 * time.Hour)}},
-			workoutEvent("אימון גב", 60), &good, "strength-20"},
+			workoutEvent("Workout back", 60), &good, "strength-20"},
 		{"picked 8 days ago is allowed again", library,
 			[]shortWorkoutPick{{URL: library[1].URL, PickedAt: testNow.Add(-8 * 24 * time.Hour)}},
-			workoutEvent("אימון גב", 60), &good, "strength-30-high"},
+			workoutEvent("Workout back", 60), &good, "strength-30-high"},
 		{"videos without a url are skipped",
 			[]shortWorkout{{Title: "no-url", DurationMin: 20, Type: "strength", Intensity: "low"}, library[4]},
-			nil, workoutEvent("אימון גב", 60), &good, "mobility-15"},
+			nil, workoutEvent("Workout back", 60), &good, "mobility-15"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,8 +78,8 @@ func groupVideo(title, group string, minutes int) shortWorkout {
 
 func TestSelectShortWorkoutMuscleGroups(t *testing.T) {
 	good := 80
-	backDay := workoutEvent("אימון גב", 60)   // A
-	chestDay := workoutEvent("אימון חזה", 60) // B
+	backDay := workoutEvent("Workout back", 60)   // A
+	chestDay := workoutEvent("Workout chest", 60) // B
 	tests := []struct {
 		name     string
 		library  []shortWorkout
@@ -98,13 +98,13 @@ func TestSelectShortWorkoutMuscleGroups(t *testing.T) {
 			[]shortWorkout{groupVideo("B-40", "B", 40), video("mobility-15", "mobility", "low", 15)}, backDay, "mobility-15"},
 		{"bare workout: full body first",
 			[]shortWorkout{groupVideo("A-35", "A", 35), groupVideo("full-15", "full", 15), video("hiit-40", "hiit", "medium", 40)},
-			workoutEvent("אימון", 60), "full-15"},
+			workoutEvent("Workout", 60), "full-15"},
 		{"bare workout without full body: any strength video, longest",
 			[]shortWorkout{groupVideo("A-20", "A", 20), groupVideo("B-35", "B", 35), video("hiit-40", "hiit", "medium", 40)},
-			workoutEvent("אימון", 60), "B-35"},
+			workoutEvent("Workout", 60), "B-35"},
 		{"a run may get any strength video",
 			[]shortWorkout{groupVideo("B-30", "B", 30), video("mobility-15", "mobility", "low", 15)},
-			workoutEvent("ריצה", 45), "B-30"},
+			workoutEvent("Run", 45), "B-30"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,8 +125,8 @@ func TestSelectShortWorkoutMuscleGroups(t *testing.T) {
 }
 
 func TestShortWorkoutDescriptionNamesMuscleGroup(t *testing.T) {
-	desc := shortWorkoutDescription(groupVideo("A-20", "A", 20), workoutEvent("אימון גב", 60))
-	if !strings.Contains(desc, "רגליים, גב, יד קדמית") {
+	desc := shortWorkoutDescription(groupVideo("A-20", "A", 20), workoutEvent("Workout back", 60))
+	if !strings.Contains(desc, "legs, back, biceps") {
 		t.Errorf("description should name the muscle group: %s", desc)
 	}
 }
@@ -150,7 +150,7 @@ func TestSelectShortWorkoutNothingFits(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, reason := selectShortWorkout(tt.library, tt.history, workoutEvent("אימון", 45), tt.readiness, testNow)
+			got, reason := selectShortWorkout(tt.library, tt.history, workoutEvent("Workout", 45), tt.readiness, testNow)
 			if got != nil {
 				t.Fatalf("want nothing, got %q", got.Title)
 			}
@@ -164,7 +164,7 @@ func TestSelectShortWorkoutNothingFits(t *testing.T) {
 func TestApplyShortWorkoutKeepsTimeSlotAndRecordsHistory(t *testing.T) {
 	cal := &fakeCalendar{}
 	historyPath := filepath.Join(t.TempDir(), "history.json")
-	original := workoutEvent("אימון גב", 60)
+	original := workoutEvent("Workout back", 60)
 	w := video("strength-20", "strength", "medium", 20)
 
 	if err := applyShortWorkout(&http.Client{Transport: cal}, original, w, historyPath, testNow); err != nil {
@@ -174,7 +174,7 @@ func TestApplyShortWorkoutKeepsTimeSlotAndRecordsHistory(t *testing.T) {
 		t.Fatalf("want one calendar update, got %v", cal.patches)
 	}
 	patch := cal.patches[0]
-	for _, want := range []string{`"summary":"strength-20"`, w.URL, "אימון גב"} {
+	for _, want := range []string{`"summary":"strength-20"`, w.URL, "Workout back"} {
 		if !strings.Contains(patch, want) {
 			t.Errorf("calendar update should contain %q: %s", want, patch)
 		}
@@ -213,11 +213,11 @@ func TestPlanRescheduleReportsWeekFull(t *testing.T) {
 	// Every day from today (Tue) to Saturday has a workout, and no later
 	// workout is a shorter [A] - nothing can be moved or superseded.
 	cal := &fakeCalendar{events: []calendarEventJSON{
-		calendarEvent("today", "אימון גב", at(9, 29, 18), 60),
-		calendarEvent("b1", "אימון חזה", at(9, 30, 18), 60),
-		calendarEvent("run", "ריצה", at(10, 1, 7), 45),
-		calendarEvent("a2", "אימון רגליים", at(10, 2, 18), 90),
-		calendarEvent("b2", "אימון כתפיים", at(10, 3, 18), 60),
+		calendarEvent("today", "Workout back", at(9, 29, 18), 60),
+		calendarEvent("b1", "Workout chest", at(9, 30, 18), 60),
+		calendarEvent("run", "Run", at(10, 1, 7), 45),
+		calendarEvent("a2", "Workout legs", at(10, 2, 18), 90),
+		calendarEvent("b2", "Workout shoulders", at(10, 3, 18), 60),
 	}}
 	plan, err := planReschedule(&http.Client{Transport: cal}, at(9, 29, 9), nil)
 	if !errors.Is(err, errWeekFull) {

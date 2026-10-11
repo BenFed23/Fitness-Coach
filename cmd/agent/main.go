@@ -1344,23 +1344,23 @@ func usingDedicatedWorkoutCalendar() bool {
 //	[B]   - chest, shoulders, triceps, abs   (Mon, and again Thu)
 //	[RUN] - running                          (Tue, usually Sat)
 //
-// e.g. "[A] רגליים גב יד קדמית ובטן". Free-text keyword matching anywhere in
-// the title was removed: substrings like "run" (Brunch), " a " (Plan a trip)
-// or "גב" (גבינה) turned ordinary events into "workouts" that then got moved
-// around the calendar.
+// e.g. "[A] Legs, back, biceps & abs". Free-text keyword matching anywhere in
+// the title was removed: substrings like "run" (Brunch) or " a " (Plan a
+// trip) turned ordinary events into "workouts" that then got moved around
+// the calendar.
 var workoutTagPattern = regexp.MustCompile(`(?i)^\s*\[(A|B|RUN)\]`)
 
-// hebrewWorkoutPattern also accepts untagged titles, but only when the title
-// STARTS with the whole word "אימון" or "ריצה" ("אימון גב", "ריצה"). The
-// words after "אימון" pick the group (see hebrewGroupWords); a bare "אימון"
-// is a generic gym session.
-var hebrewWorkoutPattern = regexp.MustCompile(`^\s*(אימון|ריצה)(?:[\s,.:\-]+(.*))?$`)
+// namedWorkoutPattern also accepts untagged titles, but only when the title
+// STARTS with the whole word "Workout" or "Run" ("Workout back", "Run"). The
+// words after "Workout" pick the group (see groupWords); a bare "Workout" is
+// a generic gym session.
+var namedWorkoutPattern = regexp.MustCompile(`(?i)^\s*(workout|run)(?:[\s,.:\-]+(.*))?$`)
 
-// hebrewGroupWords maps whole words in an "אימון ..." title to the split.
-// A leading "ו" ("and") is ignored, so "וגב" counts as "גב".
-var hebrewGroupWords = map[string]string{
-	"רגליים": "A", "רגל": "A", "גב": "A", "קדמית": "A", "ביספס": "A",
-	"חזה": "B", "כתפיים": "B", "כתף": "B", "אחורית": "B", "טרייספס": "B",
+// groupWords maps whole words (lowercase) in a "Workout ..." title to the
+// split.
+var groupWords = map[string]string{
+	"legs": "A", "leg": "A", "back": "A", "biceps": "A",
+	"chest": "B", "shoulders": "B", "shoulder": "B", "triceps": "B",
 }
 
 // supersededPrefix is prepended to a workout's title when the reschedule
@@ -1369,7 +1369,7 @@ var hebrewGroupWords = map[string]string{
 const supersededPrefix = "[SUPERSEDED] "
 
 // categorizeWorkout returns "A", "B" or "run" for a tagged title or a
-// Hebrew "אימון ..."/"ריצה" title, "gym" for a bare "אימון", or "" when the
+// "Workout ..."/"Run" title, "gym" for a bare "Workout", or "" when the
 // title isn't a workout.
 func categorizeWorkout(summary string) string {
 	if m := workoutTagPattern.FindStringSubmatch(summary); m != nil {
@@ -1378,21 +1378,18 @@ func categorizeWorkout(summary string) string {
 		}
 		return strings.ToUpper(m[1])
 	}
-	m := hebrewWorkoutPattern.FindStringSubmatch(summary)
+	m := namedWorkoutPattern.FindStringSubmatch(summary)
 	if m == nil {
 		return ""
 	}
-	if m[1] == "ריצה" {
+	if strings.EqualFold(m[1], "run") {
 		return "run"
 	}
-	words := strings.FieldsFunc(m[2], func(r rune) bool {
-		return r == ' ' || r == ',' || r == '.' || r == '-' || r == '+' || r == '/'
+	words := strings.FieldsFunc(strings.ToLower(m[2]), func(r rune) bool {
+		return r == ' ' || r == ',' || r == '.' || r == '-' || r == '+' || r == '/' || r == '&'
 	})
 	for _, word := range words {
-		if group, ok := hebrewGroupWords[word]; ok {
-			return group
-		}
-		if group, ok := hebrewGroupWords[strings.TrimPrefix(word, "ו")]; ok {
+		if group, ok := groupWords[word]; ok {
 			return group
 		}
 	}
@@ -1660,7 +1657,7 @@ func planReschedule(client *http.Client, missedDate time.Time, eligible func(cat
 	missedCategory := categorizeWorkout(missed.Summary)
 	if missedCategory == "" {
 		return plan, fmt.Errorf(
-			"%w: cascade would spill past the end of the week, and %q has no workout group ([A]/[B]/[RUN] tag or an \"אימון ...\"/\"ריצה\" title) - can't find a same-muscle-group workout to replace",
+			"%w: cascade would spill past the end of the week, and %q has no workout group ([A]/[B]/[RUN] tag or a \"Workout ...\"/\"Run\" title) - can't find a same-muscle-group workout to replace",
 			errWeekFull, missed.Summary)
 	}
 	missedDur := missed.End.Sub(missed.Start)

@@ -26,7 +26,8 @@ token expiry reminders + renewal via Telegram, tests for all of the above, repo 
 - `configs/short_workouts.json` still has only 2 sample entries with empty `url` - user must fill it.
 - Bot never run against real Telegram (no bot token yet); Docker image never built (Docker Desktop off).
 - Readiness is our estimate - Fitbit's own score isn't in the API.
-- Calendar workouts are recognized only by titles starting with `אימון` / `ריצה` or `[A]/[B]/[RUN]`.
+- Calendar workouts are recognized only by titles starting with `Workout` / `Run` or `[A]/[B]/[RUN]`
+  (English only - Hebrew titles like `אימון` are no longer recognized).
 - git `core.autocrlf` is on (CRLF in the working copy) - matters when copying files to a Linux server.
 
 **Next tasks**

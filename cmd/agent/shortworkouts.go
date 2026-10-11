@@ -144,7 +144,7 @@ func libraryTypeForCategory(category string) string {
 //     For a strength workout with a known muscle group (A or B) the order
 //     is: the same group, then full body, then other types - but never a
 //     strength video for the other group, which would train the same
-//     muscles as a neighbouring day. A bare "אימון" (no muscle group) gets
+//     muscles as a neighbouring day. A bare "Workout" (no muscle group) gets
 //     a full-body video first, then any strength video, then other types;
 //  5. of those, the longest - the most training that fits the slot (ties
 //     go to the one listed first).
@@ -237,7 +237,7 @@ func preferredShortWorkouts(candidates []shortWorkout, category string) []shortW
 			func(w shortWorkout) bool { return w.isStrength() && w.muscleGroup() == "full" },
 		}
 	case "gym":
-		// A bare "אימון" doesn't say which muscles: full body first.
+		// A bare "Workout" doesn't say which muscles: full body first.
 		tiers = []func(shortWorkout) bool{
 			func(w shortWorkout) bool { return w.isStrength() && w.muscleGroup() == "full" },
 			func(w shortWorkout) bool { return w.isStrength() },
@@ -263,15 +263,15 @@ func shortWorkoutDescription(w shortWorkout, original CalendarEvent) string {
 	if w.isStrength() {
 		kind += " (" + muscleGroupLabels[w.muscleGroup()] + ")"
 	}
-	return fmt.Sprintf("אימון קצר במקום \"%s\" - השבוע מלא ולא היה לאן להזיז אותו.\n\n%s\n\nמשך: %d דקות · סוג: %s · עצימות: %s",
+	return fmt.Sprintf("Short workout instead of \"%s\" - the week was full, so there was nowhere to move it.\n\n%s\n\nDuration: %d min · Type: %s · Intensity: %s",
 		original.Summary, w.URL, w.DurationMin, kind, w.Intensity)
 }
 
-// muscleGroupLabels describes each muscle group in Hebrew, for the calendar.
+// muscleGroupLabels describes each muscle group, for the calendar.
 var muscleGroupLabels = map[string]string{
-	"A":    "רגליים, גב, יד קדמית",
-	"B":    "חזה, כתפיים, יד אחורית",
-	"full": "כל הגוף",
+	"A":    "legs, back, biceps",
+	"B":    "chest, shoulders, triceps",
+	"full": "full body",
 }
 
 // applyShortWorkout replaces original in the calendar by w - new title and

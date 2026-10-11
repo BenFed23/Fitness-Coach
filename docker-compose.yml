@@ -1,11 +1,11 @@
 services:
   fitness-bot:
     build: .
-    restart: unless-stopped   # עולה מחדש אחרי קריסה או הפעלה מחדש של השרת
-    env_file: .env            # הסודות וההגדרות - ראו .env.example
+    restart: unless-stopped   # comes back up after a crash or a server reboot
+    env_file: .env            # secrets and settings - see .env.example
     volumes:
-      - ./data:/data          # token_health.json, token_calendar.json, מצב הבוט, היסטוריית האימונים הקצרים
-      - ./configs:/app/configs:ro   # מאגר האימונים הקצרים - עריכה בלי לבנות מחדש
+      - ./data:/data          # token_health.json, token_calendar.json, bot state, short workout history
+      - ./configs:/app/configs:ro   # the short workout library - edit without rebuilding
     logging:
       driver: json-file
       options:
