@@ -19,7 +19,8 @@ and the weather, tells you on Telegram, and moves today's workout on Google Cale
 
 **Done:** Google Health integration, readiness estimate, tracker-not-worn detection, morning message,
 `/move` with preview, cascade/supersede/short-workout fallback (type + muscle group A/B/full),
-token expiry reminders + renewal via Telegram, tests for all of the above, repo on GitHub.
+token expiry reminders + renewal via Telegram, tests for all of the above, repo on GitHub,
+README, whole project in English (bot messages, docs, keywords).
 
 **Known issues**
 - OAuth app is in Testing: Google tokens expire 7 days after approval (bot reminds; renew via `/tokens`).
@@ -31,6 +32,5 @@ token expiry reminders + renewal via Telegram, tests for all of the above, repo 
 - git `core.autocrlf` is on (CRLF in the working copy) - matters when copying files to a Linux server.
 
 **Next tasks**
-1. README for the public repo (what it is, setup, Google/Telegram config, no secrets).
-2. Rotate the OAuth client secret (it was exposed in a chat) and update GoLand + `.env`.
-3. Create the Telegram bot, test locally, then deploy per `DEPLOY.md`.
+1. Rotate the OAuth client secret (it was exposed in a chat) and update GoLand + `.env`.
+2. Create the Telegram bot, test locally, then deploy per `DEPLOY.md`.
