@@ -70,8 +70,8 @@ class RecoveryData:
     # skip_weather / skip_recovery. None = no agent (mock data).
     agent_verdict: str | None = None
     agent_has_recovery_data: bool = False
-    # GOOD / CAUTION / HAZARDOUS. The skip_weather verdict can hide a recovery CAUTION.
-    agent_recovery_severity: str | None = None
+    # A tracker reading (not something the user reported) is at CAUTION
+    agent_tracker_caution: bool = False
     warnings: list[str] = field(default_factory=list)
     # None = no adjustment today (adjustment_reason says why), or an older agent / mock data
     adjustment: Adjustment | None = None
@@ -358,7 +358,10 @@ async def get_recovery_data(ctx: UserContext | None = None) -> RecoveryData:
         skin_temp_delta_c=r["skin_temp_delta_c"],
         agent_verdict=verdict["kind"],
         agent_has_recovery_data=verdict["recovery_data_available"],
-        agent_recovery_severity=verdict["recovery_severity"],
+        agent_tracker_caution=any(
+            f["group"] == "recovery" and f["severity"] == "CAUTION" and not f.get("self_reported")
+            for f in snapshot.get("factors") or []
+        ),
         warnings=snapshot["warnings"],
         adjustment=_parse_adjustment(snapshot.get("adjustment")),
         adjustment_reason=snapshot.get("adjustment_reason", ""),
@@ -487,25 +490,25 @@ async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserCont
             if recovery.readiness_breakdown:
                 readiness += f" ({recovery.readiness_breakdown})"
             readiness += "."
-        # Dangerous weather wins the agent's verdict, but a recovery caution still means a light day
-        hidden_caution = (recovery.agent_verdict == "skip_weather" and recovery.agent_has_recovery_data
-                          and recovery.agent_recovery_severity == "CAUTION")
-        if hidden_caution:
-            lower_to("light", "Your tracker says you haven't fully recovered." + readiness)
-        # Without tracker data, the agent's "light" comes only from reported fatigue - handled in step 2
+        # Only a real tracker reading counts here: reported fatigue also makes the agent's verdict
+        # "light", but that's handled in step 2. Dangerous weather wins the verdict, so skip_weather
+        # can hide a tracker caution - that's still a light day.
+        tracker_caution = recovery.agent_has_recovery_data and recovery.agent_tracker_caution
         match recovery.agent_verdict:
             case "skip_recovery" if recovery.agent_has_recovery_data:
                 lower_to("rest", "Your tracker's recovery metrics are in the red." + readiness)
-            case "light" if recovery.agent_has_recovery_data:
+            case "light" if tracker_caution:
                 lower_to("light", "Your tracker says you haven't fully recovered." + readiness)
             case "skip_weather":
                 outdoor_ok = False
+                if tracker_caution:
+                    lower_to("light", "Your tracker says you haven't fully recovered." + readiness)
             case "adjust_for_weather":
                 reasons.append("The weather isn't ideal - adjust pace, clothing and hydration.")
         if recovery.tracker_not_worn:
             reasons.append("The tracker wasn't worn overnight - no recovery data, so this ignores sleep and heart rate.")
-        elif (recovery.agent_verdict in ("go", "adjust_for_weather", "skip_weather")
-              and recovery.agent_has_recovery_data and not hidden_caution):
+        elif (recovery.agent_verdict in ("go", "adjust_for_weather", "light", "skip_weather")
+              and recovery.agent_has_recovery_data and not tracker_caution):
             reasons.append("Your tracker's recovery metrics look fine." + readiness)
         device_sleep = None  # the tracker's sleep is already part of the agent's verdict
     else:

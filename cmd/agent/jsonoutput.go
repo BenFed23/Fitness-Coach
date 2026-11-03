@@ -77,6 +77,8 @@ type snapshotFactor struct {
 	Unit     string   `json:"unit"`
 	Severity string   `json:"severity"` // GOOD, CAUTION, HAZARDOUS or N/A
 	Note     string   `json:"note"`
+	// SelfReported marks what the user said, as opposed to a tracker reading.
+	SelfReported bool `json:"self_reported"`
 }
 
 func (k VerdictKind) String() string {
@@ -151,7 +153,7 @@ func writeSnapshotJSON(w io.Writer, loc *IPLocation, weather *WeatherResponse, r
 	}
 	addFactors := func(group string, factors []Factor) {
 		for _, f := range factors {
-			sf := snapshotFactor{Group: group, Name: f.Name, Unit: f.Unit, Severity: f.Severity.String(), Note: f.Note}
+			sf := snapshotFactor{Group: group, Name: f.Name, Unit: f.Unit, Severity: f.Severity.String(), Note: f.Note, SelfReported: f.SelfReported}
 			if !f.IsPlaceholder {
 				sf.Value = ptr(f.Value)
 			}

@@ -335,6 +335,41 @@ func TestSnapshotJSONAdjustment(t *testing.T) {
 	}
 }
 
+// The bot relies on this to tell a tracker caution from reported tiredness.
+func TestSnapshotJSONMarksSelfReportedFactors(t *testing.T) {
+	r := &RecoveryData{ReadinessIsPlaceholder: true, SleepHours: 8, RestingHR: 50, RHRBaseline: 50, FeelingExhausted: true}
+	report := BuildAgentReport(&WeatherResponse{Current: CurrentWeather{Temperature2m: 20, RelativeHumidity2m: 50}}, r)
+	if report.Kind != VerdictLight || !report.RecoveryDataAvailable {
+		t.Fatalf("verdict %s, data %v: want light with recovery data", report.Kind, report.RecoveryDataAvailable)
+	}
+
+	var buf bytes.Buffer
+	if err := writeSnapshotJSON(&buf, &IPLocation{}, &WeatherResponse{}, r, report, nil, ""); err != nil {
+		t.Fatalf("writeSnapshotJSON: %v", err)
+	}
+	var out agentSnapshot
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	found := false
+	for _, f := range out.Factors {
+		switch {
+		case f.Name == "Subjective Fatigue":
+			found = true
+			if !f.SelfReported || f.Severity != "CAUTION" {
+				t.Errorf("fatigue factor = %+v, want a self-reported CAUTION", f)
+			}
+		case f.SelfReported:
+			t.Errorf("%s is marked self-reported", f.Name)
+		case f.Group == "recovery" && f.Severity == "CAUTION":
+			t.Errorf("%s is a tracker caution, want none here", f.Name)
+		}
+	}
+	if !found {
+		t.Error("no fatigue factor in the output")
+	}
+}
+
 func TestTodaysWorkoutCategory(t *testing.T) {
 	t.Setenv("WORKOUT_CALENDAR_ID", "")
 	loc, _ := time.LoadLocation(calendarTimeZone)
