@@ -1039,8 +1039,19 @@ func evaluateRecovery(r *RecoveryData) []Factor {
 		evaluateHRV(r.HRV),
 		evaluateRespiratoryRate(r.RespiratoryRate),
 		evaluateSkinTemp(r.SkinTempDelta),
-		evaluateExhaustion(r.FeelingExhausted),
+		evaluateExhaustion(r.FeelingExhausted, r.fatigueCounts()),
 	}
+}
+
+// fatigueCounts reports whether self-reported tiredness should affect today's
+// decision: it's ignored when the readiness score says you're fine (only
+// sickness overrides a good score), but counts when the score is low or
+// there's no score to go by.
+func (r *RecoveryData) fatigueCounts() bool {
+	if !r.FeelingExhausted {
+		return false
+	}
+	return r.TrackerNotWorn || r.ReadinessIsPlaceholder || r.ReadinessScore < normalReadinessThreshold
 }
 
 // evaluateReadiness uses Fitbit's published bands: 0-29 low, 30-64
@@ -1142,16 +1153,21 @@ func evaluateRestingHR(restingHR, baseline int, isPlaceholder, baselineIsPlaceho
 	return f
 }
 
-func evaluateExhaustion(feelingExhausted bool) Factor {
+func evaluateExhaustion(feelingExhausted, counts bool) Factor {
 	// This is a direct self-report (the -exhausted flag or feeling_exhausted
 	// in recovery.json), not a synced reading. It never counts as "measured"
 	// recovery data on its own - see hasMeasuredRecoverySignal.
 	f := Factor{Name: "Subjective Fatigue", Unit: "bool", SelfReported: true}
-	if feelingExhausted {
+	switch {
+	case feelingExhausted && counts:
 		f.Value = 1
 		f.Severity = Caution
 		f.Note = "Self-reported exhaustion; listen to your body."
-	} else {
+	case feelingExhausted:
+		f.Value = 1
+		f.Severity = Good
+		f.Note = "Self-reported exhaustion; your readiness score is fine, so it doesn't change today's plan."
+	default:
 		f.Value = 0
 		f.Severity = Good
 		f.Note = "No self-reported exhaustion."
@@ -1801,7 +1817,7 @@ func main() {
 	reschedule := flag.Bool("reschedule", false,
 		"if today's verdict is to skip the workout, try to reschedule it on Google Calendar")
 	exhausted := flag.Bool("exhausted", false,
-		"self-report: you feel exhausted today (counts as a CAUTION recovery signal)")
+		"self-report: you feel exhausted today (a CAUTION signal, unless the readiness score is 65 or higher)")
 	sick := flag.Bool("sick", false,
 		"self-report: you feel sick today (workout adjustment only, not the verdict)")
 	pain := flag.Bool("pain", false,

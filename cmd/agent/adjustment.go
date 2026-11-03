@@ -241,17 +241,18 @@ func adjustmentUnavailableReason(r *RecoveryData) string {
 	}
 }
 
-// adjustedTier starts from the readiness score, lowers it one step for
-// reported fatigue or pain, then applies the caps that keep it from saying
+// adjustedTier starts from the readiness score, lowers it one step for pain
+// or for fatigue that counts (see fatigueCounts: not on a good score), then
+// applies the caps that keep it from saying
 // more than the verdict or the bot's own decision. It returns the tier and why
 // it ended up lower than the score alone, if it did.
 func adjustedTier(r *RecoveryData, report *AgentReport) (adjustmentTier, string) {
 	tier := tierForScore(r.ReadinessScore)
 	var reasons []string
 
-	if (r.FeelingExhausted || r.InPain) && tier > tierRest {
+	if (r.fatigueCounts() || r.InPain) && tier > tierRest {
 		tier--
-		if r.FeelingExhausted {
+		if r.fatigueCounts() {
 			reasons = append(reasons, "you reported feeling tired")
 		}
 		if r.InPain {

@@ -70,6 +70,8 @@ class RecoveryData:
     # skip_weather / skip_recovery. None = no agent (mock data).
     agent_verdict: str | None = None
     agent_has_recovery_data: bool = False
+    # GOOD / CAUTION / HAZARDOUS. The skip_weather verdict can hide a recovery CAUTION.
+    agent_recovery_severity: str | None = None
     warnings: list[str] = field(default_factory=list)
     # None = no adjustment today (adjustment_reason says why), or an older agent / mock data
     adjustment: Adjustment | None = None
@@ -356,6 +358,7 @@ async def get_recovery_data(ctx: UserContext | None = None) -> RecoveryData:
         skin_temp_delta_c=r["skin_temp_delta_c"],
         agent_verdict=verdict["kind"],
         agent_has_recovery_data=verdict["recovery_data_available"],
+        agent_recovery_severity=verdict["recovery_severity"],
         warnings=snapshot["warnings"],
         adjustment=_parse_adjustment(snapshot.get("adjustment")),
         adjustment_reason=snapshot.get("adjustment_reason", ""),
@@ -389,7 +392,8 @@ _BODY_PARTS = {
 NO_BODY_PART = "unspecified"
 _PAIN_WORDS = ("pain", "hurt", "injur", "sore", "sprain", "ache")
 _EXHAUSTED_WORDS = ("tired", "exhausted", "wiped out", "worn out", "drained")
-_SICK_WORDS = ("sick", "fever", "flu", "have a cold", "caught a cold")
+_SICK_WORDS = ("sick", "fever", "flu", "have a cold", "caught a cold", "unwell", "not feeling well",
+               "don't feel well", "not well today", "feeling ill", "feel ill")
 _GOOD_WORDS = ("feel great", "feel good", "feeling great", "feeling good")
 
 _SLEEP_RE = re.compile(
@@ -451,6 +455,10 @@ def apply_update(ctx: UserContext, update: UserUpdate, original_text: str) -> No
 # Deciding on the workout
 # ---------------------------------------------------------------------------
 
+# From this readiness score reported tiredness is ignored (normalReadinessThreshold in the agent)
+READINESS_OK_SCORE = 65
+
+
 async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserContext) -> WorkoutPlan:
     """
     The workout decision:
@@ -479,6 +487,11 @@ async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserCont
             if recovery.readiness_breakdown:
                 readiness += f" ({recovery.readiness_breakdown})"
             readiness += "."
+        # Dangerous weather wins the agent's verdict, but a recovery caution still means a light day
+        hidden_caution = (recovery.agent_verdict == "skip_weather" and recovery.agent_has_recovery_data
+                          and recovery.agent_recovery_severity == "CAUTION")
+        if hidden_caution:
+            lower_to("light", "Your tracker says you haven't fully recovered." + readiness)
         # Without tracker data, the agent's "light" comes only from reported fatigue - handled in step 2
         match recovery.agent_verdict:
             case "skip_recovery" if recovery.agent_has_recovery_data:
@@ -491,7 +504,8 @@ async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserCont
                 reasons.append("The weather isn't ideal - adjust pace, clothing and hydration.")
         if recovery.tracker_not_worn:
             reasons.append("The tracker wasn't worn overnight - no recovery data, so this ignores sleep and heart rate.")
-        elif recovery.agent_verdict in ("go", "adjust_for_weather", "skip_weather") and recovery.agent_has_recovery_data:
+        elif (recovery.agent_verdict in ("go", "adjust_for_weather", "skip_weather")
+              and recovery.agent_has_recovery_data and not hidden_caution):
             reasons.append("Your tracker's recovery metrics look fine." + readiness)
         device_sleep = None  # the tracker's sleep is already part of the agent's verdict
     else:
@@ -515,7 +529,13 @@ async def decide_workout(recovery: RecoveryData, weather: Weather, ctx: UserCont
     if ctx.feeling_sick:
         lower_to("rest", "You said you're sick - your body needs rest.")
     if ctx.feeling_exhausted:
-        lower_to("light", "You reported feeling tired.")
+        # With an OK score tiredness changes nothing - same rule as the agent's fatigueCounts
+        score_ok = (recovery.readiness_score is not None and not recovery.tracker_not_worn
+                    and recovery.readiness_score >= READINESS_OK_SCORE)
+        if score_ok:
+            reasons.append("You said you're tired, but your readiness score is fine, so the plan stays.")
+        else:
+            lower_to("light", "You reported feeling tired.")
     for injury in ctx.injuries:
         lower_to("light", f"Pain in your {injury} - avoid loading that area.")
 

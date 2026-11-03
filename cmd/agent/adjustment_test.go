@@ -111,7 +111,9 @@ func TestReportedSignalsLowerTier(t *testing.T) {
 		want       string
 		wantReason string
 	}{
-		{"exhausted lowers one step", RecoveryData{ReadinessScore: 90, FeelingExhausted: true}, "normal", "tired"},
+		{"tired on a push score changes nothing", RecoveryData{ReadinessScore: 90, FeelingExhausted: true}, "push", ""},
+		{"tired at the first OK score changes nothing", RecoveryData{ReadinessScore: 65, FeelingExhausted: true}, "normal", ""},
+		{"tired just below an OK score lowers one step", RecoveryData{ReadinessScore: 64, FeelingExhausted: true}, "easy", "tired"},
 		{"exhausted from reduced", RecoveryData{ReadinessScore: 55, FeelingExhausted: true}, "easy", "tired"},
 		{"exhausted never goes below rest", RecoveryData{ReadinessScore: 10, FeelingExhausted: true}, "rest", ""},
 		{"exhausted and pain is still one step", RecoveryData{ReadinessScore: 55, FeelingExhausted: true, InPain: true}, "easy", "tired; you reported being in pain"},
@@ -139,14 +141,40 @@ func TestReportedSignalsLowerTier(t *testing.T) {
 	}
 }
 
-// With a real report, -exhausted also makes the verdict "light", so a high
-// score ends up at "reduced" rather than one step lower.
-func TestExhaustedOnHighScoreUsesLightCap(t *testing.T) {
+func TestTirednessOnlyCountsWithoutAnOKScore(t *testing.T) {
+	sunny := &WeatherResponse{Current: CurrentWeather{Temperature2m: 20, RelativeHumidity2m: 50}}
+
 	r := &RecoveryData{ReadinessScore: 90, SleepHours: 8, RestingHR: 50, RHRBaseline: 50, FeelingExhausted: true}
-	report := BuildAgentReport(&WeatherResponse{Current: CurrentWeather{Temperature2m: 20, RelativeHumidity2m: 50}}, r)
+	report := BuildAgentReport(sunny, r)
 	got, _ := computeAdjustment(r, report, "A")
-	if report.Kind != VerdictLight || got.Tier != "reduced" {
-		t.Errorf("verdict %s tier %s, want light and reduced", report.Kind, got.Tier)
+	if report.Kind != VerdictGo || report.RecoverySeverity != Good || got.Tier != "push" {
+		t.Errorf("OK score: verdict %s severity %s tier %s, want go, GOOD and push", report.Kind, report.RecoverySeverity, got.Tier)
+	}
+
+	// A low score already means a light day, and tiredness lowers the tier.
+	r = &RecoveryData{ReadinessScore: 55, SleepHours: 8, RestingHR: 50, RHRBaseline: 50, FeelingExhausted: true}
+	report = BuildAgentReport(sunny, r)
+	got, _ = computeAdjustment(r, report, "A")
+	if report.Kind != VerdictLight || got.Tier != "easy" {
+		t.Errorf("low score: verdict %s tier %s, want light and easy", report.Kind, got.Tier)
+	}
+
+	// No score to say you're fine: tiredness still counts.
+	r = &RecoveryData{ReadinessIsPlaceholder: true, SleepIsPlaceholder: true, RestingHRIsPlaceholder: true,
+		RHRBaselineIsPlaceholder: true, FeelingExhausted: true}
+	if report = BuildAgentReport(sunny, r); report.Kind != VerdictLight {
+		t.Errorf("no data: verdict %s, want light", report.Kind)
+	}
+	r = &RecoveryData{ReadinessIsPlaceholder: true, SleepHours: 8, RestingHR: 50, RHRBaseline: 50, FeelingExhausted: true}
+	if report = BuildAgentReport(sunny, r); report.Kind != VerdictLight {
+		t.Errorf("no score but other readings: verdict %s, want light", report.Kind)
+	}
+
+	// Sickness still overrides a good score.
+	r = &RecoveryData{ReadinessScore: 90, SleepHours: 8, RestingHR: 50, RHRBaseline: 50, FeelingExhausted: true, FeelingSick: true}
+	got, _ = computeAdjustment(r, BuildAgentReport(sunny, r), "A")
+	if got.Tier != "rest" {
+		t.Errorf("sick on a good score: tier %s, want rest", got.Tier)
 	}
 }
 

@@ -195,7 +195,7 @@ def _reported_summary(user_ctx: UserContext) -> list[str]:
     if user_ctx.reported_sleep_hours is not None:
         items.append(f"• Sleep: {user_ctx.reported_sleep_hours:g} hours")
     if user_ctx.injuries:
-        items.append("• Pain: " + ", ".join(user_ctx.injuries))
+        items.append("• Pain: " + html.escape(", ".join(user_ctx.injuries)))
     if user_ctx.feeling_exhausted:
         items.append("• Tired")
     if user_ctx.feeling_sick:
@@ -219,10 +219,11 @@ async def build_workout_text(user_ctx: UserContext, morning: bool = False) -> st
             lines.append(f"🤕 Skip exercises that load: {html.escape(', '.join(user_ctx.injuries))}")
         lines += adjustment
     else:
-        lines += [f"{i}. {step}" for i, step in enumerate(plan.details, 1)]
+        # Steps and reasons are plain text and can quote what the user typed (a pain location)
+        lines += [f"{i}. {html.escape(step)}" for i, step in enumerate(plan.details, 1)]
         if adjustment:
             lines += ["", *adjustment]
-    lines += ["", "<b>Why?</b>", *[f"• {r}" for r in plan.reasons]]
+    lines += ["", "<b>Why?</b>", *[f"• {html.escape(r)}" for r in plan.reasons]]
     if recovery.source == "mock":
         reason = services.last_agent_error or "the agent isn't available"
         lines += ["", f"<i>⚠️ No access to tracker data ({html.escape(reason)}) - this recommendation uses mock data.</i>"]

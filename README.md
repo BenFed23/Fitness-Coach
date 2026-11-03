@@ -117,9 +117,11 @@ pace for runs, generic if there is no recognized workout.
 
 The tier can only go down from there, so it never says more than the verdict does:
 
-- Reported tiredness or pain lowers it one step (once, even if you report both).
+- Reported tiredness is ignored when the score is 65 or higher. Below that, or with no score, it
+  counts. Your messages never change the score itself.
+- Reported pain, or tiredness that counts, lowers it one step (once, even if you report both).
 - A `light` verdict, a recovery caution, reported pain or under 6 hours of reported sleep cap it at
-  Reduced. On a high score this means tiredness lands on Reduced rather than Normal.
+  Reduced.
 - A `skip_recovery` verdict, reported sickness or under 4 hours of reported sleep make it Rest.
 - Weather never changes the tier. For a run or an unrecognized workout, weather advice is added as a
   tip instead, such as moving indoors. Gym sessions get none.
@@ -176,7 +178,7 @@ You can also just write, e.g. "I only slept 5 hours" or "my knee hurts", and the
 ```
 fitness-agent [flags]
   -json                print data and verdict as JSON (used by the bot)
-  -exhausted           self-report fatigue (counts as a CAUTION signal)
+  -exhausted           self-report fatigue (a CAUTION signal, unless the readiness score is 65+)
   -sick                self-report illness (workout adjustment only, not the verdict)
   -pain                self-report pain (workout adjustment only, not the verdict)
   -reported-sleep H    self-report hours slept (workout adjustment only, not the verdict)
