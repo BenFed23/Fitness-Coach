@@ -30,9 +30,6 @@ const (
 	shortWorkoutRepeatWindow = 7 * 24 * time.Hour
 	// History older than this is dropped when the file is saved.
 	shortWorkoutHistoryKeep = 30 * 24 * time.Hour
-	// Below this readiness score (or with no score at all) only low and
-	// medium intensity videos are picked.
-	lowReadinessThreshold = 50
 )
 
 // shortWorkout is one video in configs/short_workouts.json.

@@ -20,8 +20,12 @@ type agentSnapshot struct {
 	Weather     snapshotWeather  `json:"weather"`
 	Recovery    snapshotRecovery `json:"recovery"`
 	Verdict     snapshotVerdict  `json:"verdict"`
-	Factors     []snapshotFactor `json:"factors"`
-	Warnings    []string         `json:"warnings"`
+	// Adjustment is how to change today's workout, or null when no tier can
+	// be given; AdjustmentReason then says why.
+	Adjustment       *Adjustment      `json:"adjustment"`
+	AdjustmentReason string           `json:"adjustment_reason,omitempty"`
+	Factors          []snapshotFactor `json:"factors"`
+	Warnings         []string         `json:"warnings"`
 }
 
 type snapshotLocation struct {
@@ -102,7 +106,7 @@ func ptrIf[T any](ok bool, v T) *T {
 	return &v
 }
 
-func writeSnapshotJSON(w io.Writer, loc *IPLocation, weather *WeatherResponse, r *RecoveryData, report *AgentReport) error {
+func writeSnapshotJSON(w io.Writer, loc *IPLocation, weather *WeatherResponse, r *RecoveryData, report *AgentReport, adjustment *Adjustment, adjustmentReason string) error {
 	snapshot := agentSnapshot{
 		GeneratedAt: time.Now(),
 		Location:    snapshotLocation{City: loc.City, Country: loc.Country},
@@ -138,7 +142,9 @@ func writeSnapshotJSON(w io.Writer, loc *IPLocation, weather *WeatherResponse, r
 			RecoverySeverity:      report.RecoverySeverity.String(),
 			RecoveryDataAvailable: report.RecoveryDataAvailable,
 		},
-		Warnings: r.Warnings,
+		Adjustment:       adjustment,
+		AdjustmentReason: adjustmentReason,
+		Warnings:         r.Warnings,
 	}
 	if snapshot.Warnings == nil {
 		snapshot.Warnings = []string{}

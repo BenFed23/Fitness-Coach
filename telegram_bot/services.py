@@ -40,6 +40,18 @@ AGENT_CACHE_SECONDS = 10 * 60
 # ---------------------------------------------------------------------------
 
 @dataclass
+class Adjustment:
+    """How to change today's workout - the agent's "adjustment" JSON object."""
+    tier: str                        # push / normal / reduced / easy / rest
+    volume_change_pct: int           # negative for reductions, 0 for as planned
+    max_intensity: str               # low / medium / high
+    workout_category: str            # A / B / RUN / gym / generic
+    summary: str
+    tips: list[str] = field(default_factory=list)
+    reason: str = ""                 # set when another signal lowered the tier
+
+
+@dataclass
 class RecoveryData:
     """Last night's recovery metrics. None = no reading."""
     readiness_score: int | None      # 1-100, an estimate in the style of Fitbit's Readiness
@@ -59,6 +71,9 @@ class RecoveryData:
     agent_verdict: str | None = None
     agent_has_recovery_data: bool = False
     warnings: list[str] = field(default_factory=list)
+    # None = no adjustment today (adjustment_reason says why), or an older agent / mock data
+    adjustment: Adjustment | None = None
+    adjustment_reason: str = ""
 
 
 @dataclass
@@ -114,8 +129,8 @@ class WorkoutPlan:
 # Talking to the Go agent
 # ---------------------------------------------------------------------------
 
-# Latest results per exhausted flag: {exhausted: (time, snapshot)}
-_snapshot_cache: dict[bool, tuple[float, dict]] = {}
+# Latest results per set of reported flags: {flags: (time, snapshot)}
+_snapshot_cache: dict[tuple[str, ...], tuple[float, dict]] = {}
 # Prevents several parallel runs when a few messages arrive together
 _agent_lock = asyncio.Lock()
 # Why the agent last failed (e.g. an expired token) - so the bot can show it
@@ -154,17 +169,33 @@ async def _run_agent(*flags: str) -> dict | None:
     return result
 
 
+def _reported_flags(ctx: UserContext | None) -> tuple[str, ...]:
+    """What the user reported in the chat, as agent flags."""
+    if ctx is None:
+        return ()
+    flags = []
+    if ctx.feeling_exhausted:
+        flags.append("-exhausted")
+    if ctx.feeling_sick:
+        flags.append("-sick")
+    if ctx.injuries:
+        flags.append("-pain")
+    if ctx.reported_sleep_hours is not None:
+        flags.append(f"-reported-sleep={ctx.reported_sleep_hours:g}")
+    return tuple(flags)
+
+
 async def get_agent_snapshot(ctx: UserContext | None = None) -> dict | None:
-    """The agent's result, with a short cache. Passes on fatigue reported in the chat."""
-    exhausted = bool(ctx and ctx.feeling_exhausted)
+    """The agent's result, with a short cache. Passes on what was reported in the chat."""
+    flags = _reported_flags(ctx)
     async with _agent_lock:
-        cached = _snapshot_cache.get(exhausted)
+        cached = _snapshot_cache.get(flags)
         if cached and time.monotonic() - cached[0] < AGENT_CACHE_SECONDS:
             return cached[1]
-        snapshot = await _run_agent(*(["-exhausted"] if exhausted else []))
+        snapshot = await _run_agent(*flags)
         if snapshot is not None:
             _mark_token("health", bool(snapshot["recovery"].get("auth_error")))
-            _snapshot_cache[exhausted] = (time.monotonic(), snapshot)
+            _snapshot_cache[flags] = (time.monotonic(), snapshot)
         return snapshot
 
 
@@ -284,6 +315,21 @@ def _parse_time(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+def _parse_adjustment(raw: dict | None) -> Adjustment | None:
+    """The agent's "adjustment" object. Missing (older agent) or null = no adjustment."""
+    if not raw:
+        return None
+    return Adjustment(
+        tier=raw["tier"],
+        volume_change_pct=raw["volume_change_pct"],
+        max_intensity=raw["max_intensity"],
+        workout_category=raw["workout_category"],
+        summary=raw["summary"],
+        tips=raw.get("tips") or [],
+        reason=raw.get("reason", ""),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Data integration points
 # ---------------------------------------------------------------------------
@@ -311,6 +357,8 @@ async def get_recovery_data(ctx: UserContext | None = None) -> RecoveryData:
         agent_verdict=verdict["kind"],
         agent_has_recovery_data=verdict["recovery_data_available"],
         warnings=snapshot["warnings"],
+        adjustment=_parse_adjustment(snapshot.get("adjustment")),
+        adjustment_reason=snapshot.get("adjustment_reason", ""),
     )
 
 

@@ -131,6 +131,33 @@ def _sleep_line(recovery: services.RecoveryData) -> str:
     return line
 
 
+INTENSITY_LIMITS = {"medium": "keep intensity at medium or below", "low": "keep intensity low"}
+
+
+def _adjustment_lines(recovery: services.RecoveryData) -> list[str]:
+    """The "Today's adjustment" block, or why there's none. Empty without an agent (mock data)."""
+    adjustment = recovery.adjustment
+    if adjustment is None:
+        if recovery.adjustment_reason:
+            return [f"<i>No workout adjustment - {html.escape(recovery.adjustment_reason)}.</i>"]
+        return []
+    if adjustment.tier == "rest":
+        detail = "no training"
+    elif adjustment.volume_change_pct == 0:
+        detail = "as planned"
+    else:
+        limit = INTENSITY_LIMITS.get(adjustment.max_intensity, f"max intensity {adjustment.max_intensity}")
+        detail = f"{adjustment.volume_change_pct}% volume, {limit}"
+    lines = [
+        f"<b>🎯 Today's adjustment: {html.escape(adjustment.tier.capitalize())}</b> ({html.escape(detail)})",
+        html.escape(adjustment.summary),
+        *[f"• {html.escape(tip)}" for tip in adjustment.tips],
+    ]
+    if adjustment.reason:
+        lines.append(f"<i>Lowered because {html.escape(adjustment.reason)}.</i>")
+    return lines
+
+
 async def build_status_text(user_ctx: UserContext) -> str:
     recovery = await services.get_recovery_data(user_ctx)
     weather = await services.get_weather(user_ctx)
@@ -152,6 +179,9 @@ async def build_status_text(user_ctx: UserContext) -> str:
         f"• {weather.temperature_c:.0f}°C, humidity {weather.humidity_pct:.0f}%, "
         f"rain {weather.rain_mm:g} mm, wind {weather.wind_kmh:.0f} km/h",
     ]
+    adjustment = _adjustment_lines(recovery)
+    if adjustment:
+        lines += ["", *adjustment]
     reported = _reported_summary(user_ctx)
     if reported:
         lines += ["", "<b>📝 What you reported today</b>", *reported]
@@ -182,7 +212,16 @@ async def build_workout_text(user_ctx: UserContext, morning: bool = False) -> st
     if morning:
         lines += ["☀️ <b>Good morning!</b>", f"<b>{MORNING_HEADLINES[plan.level]}</b>", ""]
     lines += [f"<b>🏋️ {plan.title}</b>", ""]
-    lines += [f"{i}. {step}" for i, step in enumerate(plan.details, 1)]
+    adjustment = _adjustment_lines(recovery)
+    if recovery.adjustment is not None and plan.level != "rest":
+        # The adjustment is specific to today's workout, so it replaces the generic steps
+        if user_ctx.injuries:
+            lines.append(f"🤕 Skip exercises that load: {html.escape(', '.join(user_ctx.injuries))}")
+        lines += adjustment
+    else:
+        lines += [f"{i}. {step}" for i, step in enumerate(plan.details, 1)]
+        if adjustment:
+            lines += ["", *adjustment]
     lines += ["", "<b>Why?</b>", *[f"• {r}" for r in plan.reasons]]
     if recovery.source == "mock":
         reason = services.last_agent_error or "the agent isn't available"

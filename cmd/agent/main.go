@@ -48,6 +48,8 @@ const (
 	// window, once at least minRHRBaselineDays of them exist.
 	rhrBaselineWindowDays = 30
 	minRHRBaselineDays    = 7
+	// How long -json waits for today's workout before using generic wording.
+	calendarLookupTimeout = 15 * time.Second
 
 	// Optional development fallbacks. Prefer CLIENT_ID and CLIENT_SECRET.
 	defaultClientID     = ""
@@ -102,6 +104,13 @@ type RecoveryData struct {
 	FeelingExhausted bool      `json:"feeling_exhausted"`
 	TrackerNotWorn   bool      `json:"-"`
 
+	// What the user reported in the chat, passed on by the bot as flags.
+	// Unlike FeelingExhausted, these only affect the workout adjustment (see
+	// adjustedTier), not the verdict: the bot applies them to its decision.
+	FeelingSick        bool     `json:"-"`
+	InPain             bool     `json:"-"`
+	ReportedSleepHours *float64 `json:"-"`
+
 	// These flags mark which fields are NOT backed by a real reading, so the
 	// report can show "-" instead of a number that looks real but isn't.
 	// With Google Health as the source, Readiness Score is our own estimate
@@ -120,6 +129,8 @@ type RecoveryData struct {
 	// ReadinessBreakdown is set when ReadinessScore is our own estimate (see
 	// estimateReadiness) rather than a value copied from the Fitbit app.
 	ReadinessBreakdown string `json:"-"`
+	// ReadinessUnavailable says why estimateReadiness couldn't give a score.
+	ReadinessUnavailable string `json:"-"`
 	// Source is where the data came from: "google_health", "recovery.json"
 	// or "mock".
 	Source string `json:"-"`
@@ -573,6 +584,7 @@ func fetchGoogleRecovery(client *http.Client) (*RecoveryData, error) {
 		recovery.ReadinessBreakdown = readiness.breakdown()
 	} else {
 		recovery.ReadinessIsPlaceholder = true
+		recovery.ReadinessUnavailable = readinessErr.Error()
 		recovery.Warnings = append(recovery.Warnings,
 			fmt.Sprintf("Readiness score can't be estimated today (%v).", readinessErr))
 	}
@@ -1524,6 +1536,53 @@ type reschedulePlan struct {
 	Superseded bool
 }
 
+// todaysWorkoutCategory returns the categorizeWorkout result of the first
+// workout on now's day, or "" if the day has none (the same workout
+// -move-today picks).
+func todaysWorkoutCategory(client *http.Client, now time.Time) (string, error) {
+	loc, err := time.LoadLocation(calendarTimeZone)
+	if err != nil {
+		return "", fmt.Errorf("load calendar timezone: %w", err)
+	}
+	day := now.In(loc)
+	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	events, err := listCalendarEvents(client, dayStart, dayStart.AddDate(0, 0, 1))
+	if err != nil {
+		return "", err
+	}
+	for _, e := range events {
+		if isWorkoutEvent(e.Summary) && sameDay(e.Start, day, loc) {
+			return categorizeWorkout(e.Summary), nil
+		}
+	}
+	return "", nil
+}
+
+// lookupTodaysWorkoutCategory is todaysWorkoutCategory with the real calendar.
+// It's only an input to the wording of the adjustment, so any failure is
+// logged and treated as an unknown workout. Never opens a browser: it only
+// runs in -json mode, where interactiveAuth is off.
+func lookupTodaysWorkoutCategory(now time.Time) string {
+	config, err := googleOAuthConfig(googleCalendarScopes...)
+	if err != nil {
+		fmt.Printf("Could not read today's workout: %v\n", err)
+		return ""
+	}
+	client, err := googleClient(context.Background(), config, calendarTokenFile)
+	if err != nil {
+		fmt.Printf("Could not read today's workout: %v\n", err)
+		return ""
+	}
+	// A slow calendar must not cost the bot its recovery data and verdict.
+	client.Timeout = calendarLookupTimeout
+	category, err := todaysWorkoutCategory(client, now)
+	if err != nil {
+		fmt.Printf("Could not read today's workout: %v\n", err)
+		return ""
+	}
+	return category
+}
+
 // errNothingToReschedule means no workout on the day is affected by the
 // verdict (e.g. only indoor sessions on a bad-weather day).
 var errNothingToReschedule = errors.New("no workout on that day is affected")
@@ -1743,6 +1802,12 @@ func main() {
 		"if today's verdict is to skip the workout, try to reschedule it on Google Calendar")
 	exhausted := flag.Bool("exhausted", false,
 		"self-report: you feel exhausted today (counts as a CAUTION recovery signal)")
+	sick := flag.Bool("sick", false,
+		"self-report: you feel sick today (workout adjustment only, not the verdict)")
+	pain := flag.Bool("pain", false,
+		"self-report: you are in pain today (workout adjustment only, not the verdict)")
+	reportedSleep := flag.Float64("reported-sleep", -1,
+		"self-report: hours slept last night (workout adjustment only, not the verdict)")
 	jsonOutput := flag.Bool("json", false,
 		"print the data and verdict as JSON on stdout (for the Telegram bot); progress messages go to stderr")
 	moveToday := flag.Bool("move-today", false,
@@ -1819,10 +1884,22 @@ func main() {
 	}
 	// The flag adds to (never clears) feeling_exhausted from recovery.json.
 	recovery.FeelingExhausted = recovery.FeelingExhausted || *exhausted
+	recovery.FeelingSick = *sick
+	recovery.InPain = *pain
+	if *reportedSleep >= 0 {
+		recovery.ReportedSleepHours = reportedSleep
+	}
 
 	report := BuildAgentReport(weather, recovery)
 	if *jsonOutput {
-		if err := writeSnapshotJSON(jsonOut, loc, weather, recovery, report); err != nil {
+		// Today's workout only sets the wording, so skip the calendar when
+		// there's no tier to word.
+		var category string
+		if adjustmentUnavailableReason(recovery) == "" {
+			category = lookupTodaysWorkoutCategory(time.Now())
+		}
+		adjustment, adjustmentReason := computeAdjustment(recovery, report, category)
+		if err := writeSnapshotJSON(jsonOut, loc, weather, recovery, report, adjustment, adjustmentReason); err != nil {
 			fmt.Printf("Could not write JSON output: %v\n", err)
 			os.Exit(1)
 		}

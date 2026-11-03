@@ -101,6 +101,33 @@ The bot expects `fitness-agent.exe` in the project root (override with `FITNESS_
 A `Dockerfile` and `docker-compose.yml` run the bot and the agent in one container on any Linux VPS.
 Tokens and bot state live in `./data`. Step-by-step instructions are in [DEPLOY.md](DEPLOY.md).
 
+## Workout adjustment
+
+On top of the verdict, the agent says how to change today's planned workout, based on the readiness
+score. The wording follows today's calendar workout: sets and load for gym sessions, distance and
+pace for runs, generic if there is no recognized workout.
+
+| Tier | Readiness score | Volume | Max intensity |
+|---|---|---|---|
+| Push | 85+ | as planned, optional small extra | high |
+| Normal | 65-84 | as planned | high |
+| Reduced | 50-64 | about 20% less | medium |
+| Easy | 30-49 | about 40% less | low |
+| Rest | under 30 | no training, mobility or a walk at most | low |
+
+The tier can only go down from there, so it never says more than the verdict does:
+
+- Reported tiredness or pain lowers it one step (once, even if you report both).
+- A `light` verdict, a recovery caution, reported pain or under 6 hours of reported sleep cap it at
+  Reduced. On a high score this means tiredness lands on Reduced rather than Normal.
+- A `skip_recovery` verdict, reported sickness or under 4 hours of reported sleep make it Rest.
+- Weather never changes the tier. For a run or an unrecognized workout, weather advice is added as a
+  tip instead, such as moving indoors. Gym sessions get none.
+
+Without a readiness score (tracker not worn, too few nights of data) there is no adjustment. The
+thresholds and percentages are rough starting points, in one table in `cmd/agent/adjustment.go`. They
+are based on our estimated score, not Fitbit's, and are not medical advice.
+
 ## Calendar workouts
 
 On the primary calendar, an event counts as a workout only if its title starts with:
@@ -150,6 +177,9 @@ You can also just write, e.g. "I only slept 5 hours" or "my knee hurts", and the
 fitness-agent [flags]
   -json                print data and verdict as JSON (used by the bot)
   -exhausted           self-report fatigue (counts as a CAUTION signal)
+  -sick                self-report illness (workout adjustment only, not the verdict)
+  -pain                self-report pain (workout adjustment only, not the verdict)
+  -reported-sleep H    self-report hours slept (workout adjustment only, not the verdict)
   -reschedule          if the verdict is to skip, reschedule today's workout
   -move-today          move today's workout regardless of the verdict
   -dry-run             with -move-today: show the changes without applying them
