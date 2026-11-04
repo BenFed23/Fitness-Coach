@@ -151,12 +151,18 @@ Set `WORKOUT_CALENDAR_ID` to a dedicated calendar to treat every event in it as 
   "duration_min": 20,
   "type": "strength",
   "muscle_group": "full",
-  "intensity": "medium"
+  "intensity": "medium",
+  "equipment": ["dumbbells"]
 }
 ```
 
 `muscle_group` is `A`, `B` or `full` (optional). The agent picks a video matching the missed
 workout and avoids repeating one within 7 days.
+
+`equipment` lists what the video needs: `dumbbells` or `gym`. Leave it out for a bodyweight video,
+and fill it in for anything else, because a video with no list counts as needing nothing. If the
+best video needs equipment, `/move` first asks what you have right now (none, dumbbells or gym) and
+only picks a video you can do. A gym counts as having everything.
 
 ## Morning report
 
@@ -191,6 +197,7 @@ fitness-agent [flags]
   -reschedule          if the verdict is to skip, reschedule today's workout
   -move-today          move today's workout regardless of the verdict
   -dry-run             with -move-today: show the changes without applying them
+  -equipment E         with -move-today: what you have for a short workout: none, dumbbells or gym
   -auth health|calendar  re-authorize without a local browser; prints a link
   -auth-code URL       with -auth: the address Google redirected to
 ```

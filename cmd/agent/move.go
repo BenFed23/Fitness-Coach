@@ -25,9 +25,13 @@ type moveResult struct {
 // moveTodaysWorkout moves today's workout forward on Google Calendar because
 // the user asked to - unlike -reschedule, it doesn't depend on the verdict.
 // If the week has no room for it, today's workout is replaced by a short one
-// from the library instead.
-func moveTodaysWorkout(now time.Time, dryRun bool) moveResult {
+// from the library instead, one the available equipment allows ("" = any).
+func moveTodaysWorkout(now time.Time, dryRun bool, equipment string) moveResult {
 	result := moveResult{DryRun: dryRun}
+	if equipment != "" && !validEquipment(equipment) {
+		result.Err = fmt.Errorf("unknown equipment %q (use %s, %s or %s)", equipment, equipmentNone, equipmentDumbbells, equipmentGym)
+		return result
+	}
 	config, err := googleOAuthConfig(googleCalendarScopes...)
 	if err != nil {
 		result.Err = err
@@ -46,7 +50,7 @@ func moveTodaysWorkout(now time.Time, dryRun bool) moveResult {
 		}
 	case errors.Is(result.Err, errWeekFull) && result.Plan != nil:
 		result.Replacement, result.Readiness, result.Err =
-			fallBackToShortWorkout(client, result.Plan.Missed, result.Err, now, dryRun)
+			fallBackToShortWorkout(client, result.Plan.Missed, result.Err, now, dryRun, equipment)
 	}
 	return result
 }
@@ -54,10 +58,14 @@ func moveTodaysWorkout(now time.Time, dryRun bool) moveResult {
 // fallBackToShortWorkout replaces missed by a short workout from the library
 // (see selectShortWorkout). With dryRun it only picks one. When nothing fits,
 // the error keeps weekErr and says why.
-func fallBackToShortWorkout(client *http.Client, missed CalendarEvent, weekErr error, now time.Time, dryRun bool) (*shortWorkout, *int, error) {
+func fallBackToShortWorkout(client *http.Client, missed CalendarEvent, weekErr error, now time.Time, dryRun bool, equipment string) (*shortWorkout, *int, error) {
 	library, err := loadShortWorkouts(shortWorkoutsPath())
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w; no short workout fallback: %v", weekErr, err)
+	}
+	library, reason := shortWorkoutsDoableWith(library, equipment)
+	if library == nil && reason != "" {
+		return nil, nil, fmt.Errorf("%w; no short workout to replace it with: %s", weekErr, reason)
 	}
 	history, err := loadShortWorkoutHistory(shortWorkoutHistoryFile)
 	if err != nil {
@@ -154,6 +162,8 @@ type replacementJSON struct {
 	MuscleGroup string `json:"muscle_group,omitempty"` // A, B or full - strength videos only
 	Replaces    string `json:"replaces"`               // the original workout's title
 	Readiness   *int   `json:"readiness"`              // the score it was chosen with, or null
+	// Equipment is what the video needs; empty means bodyweight only.
+	Equipment []string `json:"equipment"`
 }
 
 // writeMoveJSON writes the -move-today result. Expected failures (no
@@ -178,7 +188,7 @@ func writeMoveJSON(w io.Writer, r moveResult) error {
 	if w := r.Replacement; w != nil && r.Plan != nil {
 		out.Replacement = &replacementJSON{
 			Title: w.Title, URL: w.URL, DurationMin: w.DurationMin, Type: w.Type, Intensity: w.Intensity,
-			Replaces: r.Plan.Missed.Summary, Readiness: r.Readiness,
+			Replaces: r.Plan.Missed.Summary, Readiness: r.Readiness, Equipment: w.requiredEquipment(),
 		}
 		if w.isStrength() {
 			out.Replacement.MuscleGroup = w.muscleGroup()

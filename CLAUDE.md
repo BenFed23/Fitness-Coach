@@ -18,7 +18,7 @@ and the weather, tells you on Telegram, and moves today's workout on Google Cale
 - `internal/` - older unused packages (not wired into `cmd/agent`, not gofmt-clean). Leave alone.
 
 **Done:** Google Health integration, readiness estimate, tracker-not-worn detection, morning message,
-`/move` with preview, cascade/supersede/short-workout fallback (type + muscle group A/B/full),
+`/move` with preview, cascade/supersede/short-workout fallback (type + muscle group A/B/full + equipment),
 token expiry reminders + renewal via Telegram, workout adjustment by readiness (`adjustment.go`:
 tiers push/normal/reduced/easy/rest, in `-json` and the bot), tests for all of the above, repo on GitHub,
 README, whole project in English (bot messages, docs, keywords), OAuth client secret rotated

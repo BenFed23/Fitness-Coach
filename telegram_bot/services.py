@@ -299,13 +299,16 @@ def token_statuses(now: datetime | None = None) -> list[TokenStatus]:
     return statuses
 
 
-async def move_todays_workout(dry_run: bool) -> dict:
+async def move_todays_workout(dry_run: bool, equipment: str | None = None) -> dict:
     """
     Moves today's workout on Google Calendar (regardless of the recommendation).
     dry_run=True - only returns what would change, without touching the calendar.
+    equipment - what the user has for a short workout: none / dumbbells / gym. None = not asked.
     Returns the agent's JSON: ok, error, workout, changes[{summary, from, to, new_summary}].
     """
     flags = ["-move-today"] + (["-dry-run"] if dry_run else [])
+    if equipment is not None:
+        flags.append(f"-equipment={equipment}")
     result = await _run_agent(*flags)
     if result is None:
         return {"ok": False, "error": last_agent_error or "the agent isn't available", "changes": []}

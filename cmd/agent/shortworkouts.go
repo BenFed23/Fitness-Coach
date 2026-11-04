@@ -43,6 +43,66 @@ type shortWorkout struct {
 	// "A" (legs, back, biceps), "B" (chest, shoulders, triceps) or "full"
 	// (full body). Empty counts as full body.
 	MuscleGroup string `json:"muscle_group,omitempty"`
+	// Equipment is everything the video needs, e.g. ["dumbbells"]. Empty (or
+	// "none") means bodyweight only.
+	Equipment []string `json:"equipment,omitempty"`
+}
+
+// What the user can have at hand for a short workout (-equipment). Each one
+// includes the one before it: dumbbells can also do a bodyweight video, and a
+// gym has everything.
+const (
+	equipmentNone      = "none"
+	equipmentDumbbells = "dumbbells"
+	equipmentGym       = "gym"
+)
+
+func validEquipment(available string) bool {
+	return available == equipmentNone || available == equipmentDumbbells || available == equipmentGym
+}
+
+// requiredEquipment returns what w needs, normalized, with "none" left out.
+func (w shortWorkout) requiredEquipment() []string {
+	required := []string{}
+	for _, item := range w.Equipment {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item != "" && item != equipmentNone {
+			required = append(required, item)
+		}
+	}
+	return required
+}
+
+// doableWith reports whether w can be done with the available equipment. ""
+// means the user wasn't asked, so anything goes.
+func (w shortWorkout) doableWith(available string) bool {
+	if available == "" || available == equipmentGym {
+		return true
+	}
+	for _, item := range w.requiredEquipment() {
+		if item != available {
+			return false
+		}
+	}
+	return true
+}
+
+// shortWorkoutsDoableWith narrows the library to what the available equipment
+// allows. When that leaves nothing it returns nil and a reason for the user.
+func shortWorkoutsDoableWith(library []shortWorkout, available string) ([]shortWorkout, string) {
+	if available == "" || len(library) == 0 {
+		return library, ""
+	}
+	var doable []shortWorkout
+	for _, w := range library {
+		if w.doableWith(available) {
+			doable = append(doable, w)
+		}
+	}
+	if len(doable) == 0 {
+		return nil, fmt.Sprintf("no video in the library can be done with this equipment (%s)", available)
+	}
+	return doable, ""
 }
 
 // muscleGroup returns w's muscle group, "full" when unset.
@@ -260,8 +320,12 @@ func shortWorkoutDescription(w shortWorkout, original CalendarEvent) string {
 	if w.isStrength() {
 		kind += " (" + muscleGroupLabels[w.muscleGroup()] + ")"
 	}
-	return fmt.Sprintf("Short workout instead of \"%s\" - the week was full, so there was nowhere to move it.\n\n%s\n\nDuration: %d min · Type: %s · Intensity: %s",
+	description := fmt.Sprintf("Short workout instead of \"%s\" - the week was full, so there was nowhere to move it.\n\n%s\n\nDuration: %d min · Type: %s · Intensity: %s",
 		original.Summary, w.URL, w.DurationMin, kind, w.Intensity)
+	if required := w.requiredEquipment(); len(required) > 0 {
+		description += " · Equipment: " + strings.Join(required, ", ")
+	}
+	return description
 }
 
 // muscleGroupLabels describes each muscle group, for the calendar.

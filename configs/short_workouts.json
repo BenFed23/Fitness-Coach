@@ -5,7 +5,8 @@
     "duration_min": 20,
     "type": "strength",
     "muscle_group": "full",
-    "intensity": "medium"
+    "intensity": "medium",
+    "equipment": ["dumbbells"]
   },
   {
     "title": "Example: mobility and stretching",
