@@ -73,6 +73,9 @@ MORNING_HEADLINES = {
     "light": "⚠️ Light workout only today",
     "rest": "⛔ No training today - rest day",
 }
+# A "full" day decided without recovery data can't claim you're good to train
+NO_DATA_HEADLINE_GOOD_WEATHER = "✅ Weather looks fine - no recovery data today"
+NO_DATA_HEADLINE_BAD_WEATHER = "⚠️ No recovery data today - mind the weather"
 MOVE_BUTTON = InlineKeyboardMarkup([[InlineKeyboardButton("📅 Move today's workout", callback_data="move")]])
 
 # States of the guided conversation (/update) and of token renewal from the phone
@@ -158,14 +161,12 @@ def _adjustment_lines(recovery: services.RecoveryData) -> list[str]:
     return lines
 
 
-async def build_status_text(user_ctx: UserContext) -> str:
-    recovery = await services.get_recovery_data(user_ctx)
-    weather = await services.get_weather(user_ctx)
-
+def _metrics_lines(recovery: services.RecoveryData, weather: services.Weather) -> list[str]:
+    """Last night's readings and the weather, for /status and the morning report."""
     readiness = _fmt(recovery.readiness_score)
     if recovery.readiness_breakdown:
         readiness += f" <i>({recovery.readiness_breakdown})</i>"
-    lines = [
+    return [
         "<b>📊 Recovery</b>",
         f"• Readiness score: {readiness}",
         _sleep_line(recovery),
@@ -179,6 +180,13 @@ async def build_status_text(user_ctx: UserContext) -> str:
         f"• {weather.temperature_c:.0f}°C, humidity {weather.humidity_pct:.0f}%, "
         f"rain {weather.rain_mm:g} mm, wind {weather.wind_kmh:.0f} km/h",
     ]
+
+
+async def build_status_text(user_ctx: UserContext) -> str:
+    recovery = await services.get_recovery_data(user_ctx)
+    weather = await services.get_weather(user_ctx)
+
+    lines = _metrics_lines(recovery, weather)
     adjustment = _adjustment_lines(recovery)
     if adjustment:
         lines += ["", *adjustment]
@@ -203,6 +211,12 @@ def _reported_summary(user_ctx: UserContext) -> list[str]:
     return items
 
 
+def _morning_headline(plan: services.WorkoutPlan, recovery: services.RecoveryData) -> str:
+    if plan.level == "full" and recovery.agent_verdict is not None and not recovery.agent_has_recovery_data:
+        return NO_DATA_HEADLINE_GOOD_WEATHER if recovery.agent_verdict == "go" else NO_DATA_HEADLINE_BAD_WEATHER
+    return MORNING_HEADLINES[plan.level]
+
+
 async def build_workout_text(user_ctx: UserContext, morning: bool = False) -> str:
     recovery = await services.get_recovery_data(user_ctx)
     weather = await services.get_weather(user_ctx)
@@ -210,7 +224,7 @@ async def build_workout_text(user_ctx: UserContext, morning: bool = False) -> st
 
     lines = []
     if morning:
-        lines += ["☀️ <b>Good morning!</b>", f"<b>{MORNING_HEADLINES[plan.level]}</b>", ""]
+        lines += ["☀️ <b>Good morning!</b>", f"<b>{_morning_headline(plan, recovery)}</b>", ""]
     lines += [f"<b>🏋️ {plan.title}</b>", ""]
     adjustment = _adjustment_lines(recovery)
     if recovery.adjustment is not None and plan.level != "rest":
@@ -224,6 +238,8 @@ async def build_workout_text(user_ctx: UserContext, morning: bool = False) -> st
         if adjustment:
             lines += ["", *adjustment]
     lines += ["", "<b>Why?</b>", *[f"• {html.escape(r)}" for r in plan.reasons]]
+    if morning:
+        lines += ["", *_metrics_lines(recovery, weather)]
     if recovery.source == "mock":
         reason = services.last_agent_error or "the agent isn't available"
         lines += ["", f"<i>⚠️ No access to tracker data ({html.escape(reason)}) - this recommendation uses mock data.</i>"]

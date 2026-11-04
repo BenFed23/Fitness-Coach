@@ -158,6 +158,12 @@ Set `WORKOUT_CALENDAR_ID` to a dedicated calendar to treat every event in it as 
 `muscle_group` is `A`, `B` or `full` (optional). The agent picks a video matching the missed
 workout and avoids repeating one within 7 days.
 
+## Morning report
+
+Every morning at `DAILY_TIME`, the bot sends each allowed user a report: whether to train, today's
+workout adjustment and why, last night's recovery readings and the weather. It's on by default,
+`/daily` turns it off or on, and it only goes out while the bot is running.
+
 ## Bot commands
 
 | Command | |
