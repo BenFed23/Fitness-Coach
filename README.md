@@ -162,7 +162,9 @@ workout and avoids repeating one within 7 days.
 `equipment` lists what the video needs: `dumbbells` or `gym`. Leave it out for a bodyweight video,
 and fill it in for anything else, because a video with no list counts as needing nothing. If the
 best video needs equipment, `/move` first asks what you have right now (none, dumbbells or gym) and
-only picks a video you can do. A gym counts as having everything.
+only picks a video you can do. A gym counts as having everything. Any other value, such as a typo,
+makes the video gym-only: the bot warns about it when it looks for a short workout, and
+`go test ./cmd/agent/...` fails on it.
 
 ## Morning report
 
@@ -198,6 +200,7 @@ fitness-agent [flags]
   -move-today          move today's workout regardless of the verdict
   -dry-run             with -move-today: show the changes without applying them
   -equipment E         with -move-today: what you have for a short workout: none, dumbbells or gym
+  -no-replace          with -move-today: only move; if the week is full, fail instead of using a short workout
   -auth health|calendar  re-authorize without a local browser; prints a link
   -auth-code URL       with -auth: the address Google redirected to
 ```

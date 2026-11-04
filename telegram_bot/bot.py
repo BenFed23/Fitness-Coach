@@ -665,21 +665,29 @@ def _needs_equipment_answer(result: dict, equipment: str | None) -> bool:
     return equipment is None and bool(replacement and replacement.get("equipment"))
 
 
-async def _ask_equipment(reply, result: dict) -> None:
+async def _ask_equipment(reply, result: dict, warnings: str = "") -> None:
     await reply(f"📅 <b>Nowhere to move \"{html.escape(result['workout'])}\" - the week is full</b>\n\n"
-                "I can replace it with a short workout. What equipment do you have right now?",
+                f"I can replace it with a short workout. What equipment do you have right now?{warnings}",
                 parse_mode=ParseMode.HTML, reply_markup=EQUIPMENT_MENU)
+
+
+def _library_warnings(result: dict) -> str:
+    """Problems with the short workout library (e.g. a typo in equipment), to append to a message."""
+    return "".join(f"\n\n<i>⚠️ {html.escape(warning)}</i>" for warning in result.get("warnings") or [])
 
 
 async def _preview_move(reply, equipment: str | None = None) -> None:
     """Shows what will change on the calendar and asks for confirmation. reply = a function that sends a message."""
     result = await services.move_todays_workout(dry_run=True, equipment=equipment)
+    warnings = _library_warnings(result)
     if not result.get("ok"):
-        await reply(f"Couldn't move the workout 😕\n<i>{html.escape(result.get('error', ''))}</i>",
-                    parse_mode=ParseMode.HTML)
+        # No video fits that answer: let the user try another one (a gym already allows everything)
+        retry = EQUIPMENT_MENU if result.get("week_full") and equipment in ("none", "dumbbells") else None
+        await reply(f"Couldn't move the workout 😕\n<i>{html.escape(result.get('error', ''))}</i>{warnings}",
+                    parse_mode=ParseMode.HTML, reply_markup=retry)
         return
     if _needs_equipment_answer(result, equipment):
-        await _ask_equipment(reply, result)
+        await _ask_equipment(reply, result, warnings)
         return
 
     replacement = result.get("replacement")
@@ -695,8 +703,12 @@ async def _preview_move(reply, equipment: str | None = None) -> None:
         confirm = "✅ Yes, move it"
         text = "\n".join([f"📅 <b>Moving \"{html.escape(result['workout'])}\"</b>", "", "What will change on the calendar:",
                           *_describe_changes(result)])
+    text += warnings
+    # Confirming a video says what it may need (no answer means this pick needs nothing).
+    # Confirming a move carries no answer, so that it can only ever move.
+    confirm_data = f"move_confirm:{equipment or 'none'}" if replacement else "move_confirm"
     buttons = InlineKeyboardMarkup([[
-        InlineKeyboardButton(confirm, callback_data=f"move_confirm:{equipment}" if equipment else "move_confirm"),
+        InlineKeyboardButton(confirm, callback_data=confirm_data),
         InlineKeyboardButton("❌ Cancel", callback_data="move_cancel"),
     ]])
     await reply(text, parse_mode=ParseMode.HTML, reply_markup=buttons)
@@ -725,15 +737,13 @@ async def move_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _preview_move(query.edit_message_text, equipment)
     elif action == "move_confirm":
         await query.edit_message_text("⏳ Moving on the calendar...")
-        if equipment is None:
-            # The week may have filled up since a preview that only moved the workout:
-            # never replace it with a video without asking about equipment first
-            check = await services.move_todays_workout(dry_run=True)
-            if check.get("ok") and _needs_equipment_answer(check, None):
-                await _ask_equipment(query.edit_message_text, check)
-                return
-        # Recompute before applying, in case the calendar changed since the preview
-        result = await services.move_todays_workout(dry_run=False, equipment=equipment)
+        # Recompute before applying, in case the calendar changed since the preview. A confirmed
+        # move can only move: if the week has filled up since, nothing changes and the user
+        # sees a new preview, rather than a video replacing the workout unseen.
+        result = await services.move_todays_workout(dry_run=False, equipment=equipment, no_replace=equipment is None)
+        if equipment is None and result.get("week_full"):
+            await _preview_move(query.edit_message_text)
+            return
         if result.get("ok") and result.get("replacement"):
             await query.edit_message_text("\n".join([
                 f"✅ <b>\"{html.escape(result['workout'])}\" was replaced on the calendar with a short workout:</b>", "",

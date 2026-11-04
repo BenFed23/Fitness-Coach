@@ -43,8 +43,8 @@ type shortWorkout struct {
 	// "A" (legs, back, biceps), "B" (chest, shoulders, triceps) or "full"
 	// (full body). Empty counts as full body.
 	MuscleGroup string `json:"muscle_group,omitempty"`
-	// Equipment is everything the video needs, e.g. ["dumbbells"]. Empty (or
-	// "none") means bodyweight only.
+	// Equipment is everything the video needs, e.g. ["dumbbells"]. Empty,
+	// "none" or "bodyweight" means bodyweight only.
 	Equipment []string `json:"equipment,omitempty"`
 }
 
@@ -55,22 +55,41 @@ const (
 	equipmentNone      = "none"
 	equipmentDumbbells = "dumbbells"
 	equipmentGym       = "gym"
+	// Also accepted in the library, meaning the same as "none".
+	equipmentBodyweight = "bodyweight"
 )
 
 func validEquipment(available string) bool {
 	return available == equipmentNone || available == equipmentDumbbells || available == equipmentGym
 }
 
-// requiredEquipment returns what w needs, normalized, with "none" left out.
+// requiredEquipment returns what w needs, normalized, with "none" and
+// "bodyweight" left out.
 func (w shortWorkout) requiredEquipment() []string {
 	required := []string{}
 	for _, item := range w.Equipment {
 		item = strings.ToLower(strings.TrimSpace(item))
-		if item != "" && item != equipmentNone {
+		if item != "" && item != equipmentNone && item != equipmentBodyweight {
 			required = append(required, item)
 		}
 	}
 	return required
+}
+
+// libraryEquipmentWarnings lists equipment values the library shouldn't have,
+// usually typos. Such a video is safe, since it only counts as doable at a gym
+// (see doableWith), but it would quietly stop being picked anywhere else.
+func libraryEquipmentWarnings(library []shortWorkout) []string {
+	var warnings []string
+	for _, w := range library {
+		for _, item := range w.requiredEquipment() {
+			if item != equipmentDumbbells && item != equipmentGym {
+				warnings = append(warnings, fmt.Sprintf("%q lists unknown equipment %q (use %s or %s), so it can only be picked at the gym",
+					w.Title, item, equipmentDumbbells, equipmentGym))
+			}
+		}
+	}
+	return warnings
 }
 
 // doableWith reports whether w can be done with the available equipment. ""

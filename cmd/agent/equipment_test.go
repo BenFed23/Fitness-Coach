@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,9 @@ func TestDoableWith(t *testing.T) {
 		{"not asked allows anything", []string{"gym"}, "", true},
 		{"no list on no equipment", nil, equipmentNone, true},
 		{"explicit none on no equipment", []string{"none"}, equipmentNone, true},
+		{"bodyweight on no equipment", []string{" Bodyweight "}, equipmentNone, true},
+		{"a typo isn't doable with dumbbells", []string{"dumbell"}, equipmentDumbbells, false},
+		{"a typo is doable at the gym", []string{"dumbell"}, equipmentGym, true},
 		{"dumbbells on no equipment", []string{"dumbbells"}, equipmentNone, false},
 		{"gym on no equipment", []string{"gym"}, equipmentNone, false},
 		{"no list with dumbbells", nil, equipmentDumbbells, true},
@@ -104,9 +108,83 @@ func TestFallBackRespectsEquipment(t *testing.T) {
 }
 
 func TestMoveRejectsUnknownEquipment(t *testing.T) {
-	result := moveTodaysWorkout(time.Now(), true, "bands")
+	result := moveTodaysWorkout(time.Now(), true, "bands", false)
 	if result.Err == nil || !strings.Contains(result.Err.Error(), "unknown equipment") {
 		t.Errorf("err = %v, want an unknown equipment error", result.Err)
+	}
+}
+
+func TestNoReplaceNeverSwapsInAVideo(t *testing.T) {
+	fallbackLibrary(t, []shortWorkout{{Title: "bodyweight", URL: "https://example.com/b", DurationMin: 20, Type: "strength", Intensity: "medium"}})
+	loc, _ := time.LoadLocation(calendarTimeZone)
+	// Saturday, the last day of the week, so there's nowhere to move it.
+	now := time.Date(2026, 10, 3, 9, 0, 0, 0, loc)
+	saturdayWorkout := []calendarEventJSON{calendarEvent("a", "[A] Legs", time.Date(2026, 10, 3, 18, 0, 0, 0, loc), 60)}
+
+	for _, dryRun := range []bool{true, false} {
+		cal := &fakeCalendar{events: saturdayWorkout}
+		r := moveWorkoutOnCalendar(&http.Client{Transport: cal}, now, dryRun, "", true)
+		if !errors.Is(r.Err, errWeekFull) || r.Replacement != nil || len(cal.patches) != 0 {
+			t.Errorf("dryRun %v: err %v, replacement %v, patches %v: want a week-full error and no change", dryRun, r.Err, r.Replacement, cal.patches)
+		}
+		var buf bytes.Buffer
+		if err := writeMoveJSON(&buf, r); err != nil {
+			t.Fatal(err)
+		}
+		var out moveJSON
+		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.OK || !out.WeekFull {
+			t.Errorf("dryRun %v: ok %v, week_full %v: want false and true", dryRun, out.OK, out.WeekFull)
+		}
+	}
+
+	// Without it the same week falls back to the video, on the calendar too.
+	cal := &fakeCalendar{events: saturdayWorkout}
+	r := moveWorkoutOnCalendar(&http.Client{Transport: cal}, now, false, equipmentNone, false)
+	if r.Err != nil || r.Replacement == nil || len(cal.patches) != 1 {
+		t.Errorf("err %v, replacement %v, patches %v: want the video applied", r.Err, r.Replacement, cal.patches)
+	}
+
+	// A normal move still works with it.
+	cal = &fakeCalendar{events: []calendarEventJSON{calendarEvent("a", "[A] Legs", time.Date(2026, 9, 29, 18, 0, 0, 0, loc), 60)}}
+	r = moveWorkoutOnCalendar(&http.Client{Transport: cal}, time.Date(2026, 9, 29, 9, 0, 0, 0, loc), false, "", true)
+	if r.Err != nil || len(cal.patches) != 1 {
+		t.Errorf("err %v, patches %v: want the workout moved", r.Err, cal.patches)
+	}
+}
+
+func TestLibraryEquipmentWarnings(t *testing.T) {
+	library := []shortWorkout{
+		{Title: "fine", Equipment: []string{"dumbbells", "gym", "none", "bodyweight"}},
+		{Title: "no list"},
+		{Title: "typo", Equipment: []string{"dumbell"}},
+	}
+	got := libraryEquipmentWarnings(library)
+	if len(got) != 1 || !strings.Contains(got[0], `"typo"`) || !strings.Contains(got[0], `"dumbell"`) {
+		t.Errorf("warnings = %v, want one about the typo", got)
+	}
+
+	// The warning reaches the bot, and the video is still left out.
+	fallbackLibrary(t, library)
+	loc, _ := time.LoadLocation(calendarTimeZone)
+	saturday := time.Date(2026, 10, 3, 9, 0, 0, 0, loc)
+	cal := &fakeCalendar{events: []calendarEventJSON{calendarEvent("a", "[A] Legs", time.Date(2026, 10, 3, 18, 0, 0, 0, loc), 60)}}
+	r := moveWorkoutOnCalendar(&http.Client{Transport: cal}, saturday, true, equipmentNone, false)
+	if len(r.Warnings) != 1 {
+		t.Errorf("warnings = %v, want one", r.Warnings)
+	}
+}
+
+// Catches a typo in the real library when it's committed, not on a busy morning.
+func TestRealLibraryHasNoEquipmentTypos(t *testing.T) {
+	library, err := loadShortWorkouts(filepath.Join("..", "..", "configs", "short_workouts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, warning := range libraryEquipmentWarnings(library) {
+		t.Error(warning)
 	}
 }
 

@@ -19,36 +19,45 @@ type moveResult struct {
 	// (or would be) replaced by a short workout instead of moved.
 	Replacement *shortWorkout
 	Readiness   *int // the readiness score the replacement was chosen with
-	Err         error
+	// Warnings are problems with the short workout library worth fixing.
+	Warnings []string
+	Err      error
 }
 
 // moveTodaysWorkout moves today's workout forward on Google Calendar because
 // the user asked to - unlike -reschedule, it doesn't depend on the verdict.
 // If the week has no room for it, today's workout is replaced by a short one
 // from the library instead, one the available equipment allows ("" = any).
-func moveTodaysWorkout(now time.Time, dryRun bool, equipment string) moveResult {
-	result := moveResult{DryRun: dryRun}
+// With noReplace it never does that: a full week is just an error, so someone
+// who approved a move can't end up with a video they never saw.
+func moveTodaysWorkout(now time.Time, dryRun bool, equipment string, noReplace bool) moveResult {
 	if equipment != "" && !validEquipment(equipment) {
-		result.Err = fmt.Errorf("unknown equipment %q (use %s, %s or %s)", equipment, equipmentNone, equipmentDumbbells, equipmentGym)
-		return result
+		return moveResult{DryRun: dryRun, Err: fmt.Errorf("unknown equipment %q (use %s, %s or %s)", equipment, equipmentNone, equipmentDumbbells, equipmentGym)}
 	}
 	config, err := googleOAuthConfig(googleCalendarScopes...)
 	if err != nil {
-		result.Err = err
-		return result
+		return moveResult{DryRun: dryRun, Err: err}
 	}
 	client, err := googleClient(context.Background(), config, calendarTokenFile)
 	if err != nil {
-		result.Err = fmt.Errorf("authorize Google Calendar: %w", err)
-		return result
+		return moveResult{DryRun: dryRun, Err: fmt.Errorf("authorize Google Calendar: %w", err)}
 	}
+	return moveWorkoutOnCalendar(client, now, dryRun, equipment, noReplace)
+}
+
+// moveWorkoutOnCalendar is moveTodaysWorkout once the calendar client exists.
+func moveWorkoutOnCalendar(client *http.Client, now time.Time, dryRun bool, equipment string, noReplace bool) moveResult {
+	result := moveResult{DryRun: dryRun}
 	result.Plan, result.Err = planReschedule(client, now, nil)
 	switch {
 	case result.Err == nil:
 		if !dryRun {
 			result.Err = applyReschedulePlan(client, result.Plan)
 		}
-	case errors.Is(result.Err, errWeekFull) && result.Plan != nil:
+	case errors.Is(result.Err, errWeekFull) && result.Plan != nil && !noReplace:
+		if library, err := loadShortWorkouts(shortWorkoutsPath()); err == nil {
+			result.Warnings = libraryEquipmentWarnings(library)
+		}
 		result.Replacement, result.Readiness, result.Err =
 			fallBackToShortWorkout(client, result.Plan.Missed, result.Err, now, dryRun, equipment)
 	}
@@ -102,6 +111,9 @@ func currentReadiness() *int {
 }
 
 func printMoveResult(r moveResult) {
+	for _, warning := range r.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
 	if r.Err != nil {
 		fmt.Printf("Could not move today's workout: %v\n", r.Err)
 		return
@@ -145,12 +157,15 @@ type moveJSON struct {
 	DryRun     bool             `json:"dry_run"`
 	Error      string           `json:"error,omitempty"`
 	AuthError  bool             `json:"auth_error"`        // the calendar needs re-authorization
+	WeekFull   bool             `json:"week_full"`         // failed because the week has no room
 	Workout    string           `json:"workout,omitempty"` // today's workout being moved
 	Superseded bool             `json:"superseded"`
 	Changes    []moveChangeJSON `json:"changes"`
 	// Replacement is set when the week was full and today's workout was
 	// replaced (same time slot) by a short workout from the library.
 	Replacement *replacementJSON `json:"replacement,omitempty"`
+	// Warnings are problems with the short workout library worth fixing.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type replacementJSON struct {
@@ -169,10 +184,11 @@ type replacementJSON struct {
 // writeMoveJSON writes the -move-today result. Expected failures (no
 // workout today, a full week...) are reported in "error", not the exit code.
 func writeMoveJSON(w io.Writer, r moveResult) error {
-	out := moveJSON{OK: r.Err == nil, DryRun: r.DryRun, Changes: []moveChangeJSON{}}
+	out := moveJSON{OK: r.Err == nil, DryRun: r.DryRun, Changes: []moveChangeJSON{}, Warnings: r.Warnings}
 	if r.Err != nil {
 		out.Error = r.Err.Error()
 		out.AuthError = errors.Is(r.Err, errNeedsAuthorization)
+		out.WeekFull = errors.Is(r.Err, errWeekFull)
 	}
 	if r.Plan != nil {
 		out.Workout = r.Plan.Missed.Summary

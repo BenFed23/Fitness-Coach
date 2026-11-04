@@ -1832,6 +1832,8 @@ func main() {
 		"with -move-today: only show what would change, without touching the calendar")
 	equipment := flag.String("equipment", "",
 		"with -move-today: what you have for a short workout: none, dumbbells or gym (default: any video)")
+	noReplace := flag.Bool("no-replace", false,
+		"with -move-today: only move the workout; if the week is full, fail instead of replacing it with a short workout")
 	authFor := flag.String("auth", "",
 		"re-authorize Google without a local browser: health or calendar. Prints a link; then pass the address you land on with -auth-code")
 	authCode := flag.String("auth-code", "",
@@ -1864,7 +1866,7 @@ func main() {
 	}
 
 	if *moveToday {
-		result := moveTodaysWorkout(time.Now(), *dryRun, *equipment)
+		result := moveTodaysWorkout(time.Now(), *dryRun, *equipment, *noReplace)
 		if *jsonOutput {
 			if err := writeMoveJSON(jsonOut, result); err != nil {
 				fmt.Printf("Could not write JSON output: %v\n", err)
