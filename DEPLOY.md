@@ -46,8 +46,7 @@ scp token_health.json token_calendar.json user@server:~/fitness-agent/data/
 scp .env.example user@server:~/fitness-agent/.env
 ```
 
-Git's `core.autocrlf` may have given the working copy Windows (CRLF) line endings. If the container
-fails on a script or config file, convert them on the server, e.g. with `dos2unix`.
+The repo enforces LF line endings through `.gitattributes`, so the copied files have no Windows (CRLF) line endings.
 
 On the server - fill in `~/fitness-agent/.env` (Telegram token, your ID, CLIENT_ID/SECRET, location):
 
