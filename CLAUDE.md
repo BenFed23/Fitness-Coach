@@ -15,7 +15,6 @@ and the weather, tells you on Telegram, and moves today's workout on Google Cale
 - `telegram_bot/` (Python, python-telegram-bot) - runs the agent as a subprocess (`services.py`).
 - `configs/short_workouts.json` - hand-maintained YouTube library. Tokens/history live next to the binary
   (`data/` on the server). Docker + `DEPLOY.md` for a VPS.
-- `internal/` - older unused packages (not wired into `cmd/agent`, not gofmt-clean). Leave alone.
 
 **Done:** Google Health integration, readiness estimate, tracker-not-worn detection, morning message,
 `/move` with preview, cascade/supersede/short-workout fallback (type + muscle group A/B/full + equipment),

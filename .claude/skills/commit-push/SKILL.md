@@ -57,8 +57,7 @@ go test ./...
 ```
 
 Every Go file you're committing must be gofmt-clean (`gofmt -l <files>`
-prints nothing). Some older files under `internal/` aren't formatted; don't
-reformat them as a side effect of an unrelated change.
+prints nothing).
 
 If Python files in `telegram_bot/` changed:
 

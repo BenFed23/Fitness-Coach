@@ -29,8 +29,6 @@ cmd/agent/        Go agent. Google Health, Open-Meteo, Calendar, OAuth. Every op
 configs/          short_workouts.json - the hand-maintained short-workout library.
 ```
 
-`internal/` holds older packages that are not used by `cmd/agent`.
-
 ## Requirements
 
 - Go 1.26+
