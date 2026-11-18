@@ -33,24 +33,32 @@ On the server (Ubuntu):
 
 ```bash
 curl -fsSL https://get.docker.com | sh
+sudo apt-get install -y git
+```
+
+## 4. Get the project and copy the tokens
+
+On the server, clone the repo (`data/` is in `.gitignore`, so create it yourself):
+
+```bash
+git clone https://github.com/BenFed23/Fitness-Coach.git ~/fitness-agent
 mkdir -p ~/fitness-agent/data
 ```
 
-## 4. Copy the project and the tokens
+The repo enforces LF line endings for tracked files through `.gitattributes`.
 
-From your computer (PowerShell, in the project folder; replace `user@server`):
+Only the secrets come from your computer. Copy the tokens (PowerShell, in the project folder; replace
+`user@server`):
 
 ```powershell
-scp -r Dockerfile docker-compose.yml .dockerignore go.mod go.sum cmd configs telegram_bot user@server:~/fitness-agent/
 scp token_health.json token_calendar.json user@server:~/fitness-agent/data/
-scp .env.example user@server:~/fitness-agent/.env
 ```
 
-The repo enforces LF line endings through `.gitattributes`, so the copied files have no Windows (CRLF) line endings.
-
-On the server - fill in `~/fitness-agent/.env` (Telegram token, your ID, CLIENT_ID/SECRET, location):
+On the server - create `~/fitness-agent/.env` from `.env.example` and fill it in (Telegram token, your ID,
+CLIENT_ID/SECRET, location). Create it here rather than copying one made on Windows, so it has no CRLF:
 
 ```bash
+cp ~/fitness-agent/.env.example ~/fitness-agent/.env
 nano ~/fitness-agent/.env
 chmod 600 ~/fitness-agent/.env ~/fitness-agent/data/*.json
 ```
@@ -67,8 +75,15 @@ Send the bot `/start` and `/status` - the source should be "Fitbit (Google Healt
 
 ## Updating
 
-Copy the changed files again and run `docker compose up -d --build`.
-The tokens and the bot's state are kept in `data/` and aren't deleted.
+```bash
+cd ~/fitness-agent
+git pull
+docker compose up -d --build
+```
+
+The tokens and the bot's state are kept in `data/` and aren't deleted. `configs/short_workouts.json` is
+tracked by git, so if you edited it on the server, `git pull` may refuse to overwrite it - commit the
+library from your computer instead, or run `git stash` before pulling and `git stash pop` after.
 
 ## The short workout library
 
@@ -86,3 +101,5 @@ The history (so a video isn't repeated within 7 days) is kept in `data/short_wor
   `[A]`, `[B]`, `[RUN]`, `Workout` or `Run` count
   (or set `WORKOUT_CALENDAR_ID` to a separate workouts calendar).
 - **Weather for a different city** - `AGENT_LATITUDE` / `AGENT_LONGITUDE` are missing from `.env`.
+- **A file has Windows line endings (CRLF) on the server** - convert it with `dos2unix <file>`, or run
+  `git add --renormalize .` locally, commit, and `git pull` on the server.

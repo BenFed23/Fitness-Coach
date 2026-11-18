@@ -39,6 +39,8 @@ README, whole project in English (bot messages, docs, keywords), OAuth client se
 - Readiness is our estimate - Fitbit's own score isn't in the API.
 - Calendar workouts are recognized only by titles starting with `Workout` / `Run` or `[A]/[B]/[RUN]`
   (English only - Hebrew titles like `אימון` are no longer recognized).
+- `.gitattributes` enforces LF only for tracked files; untracked or uncommitted files (e.g. a `.env` made
+  on Windows) aren't covered - create `.env` on the server.
 
 **Next tasks**
 1. Create the Telegram bot, test locally, then deploy per `DEPLOY.md`.
