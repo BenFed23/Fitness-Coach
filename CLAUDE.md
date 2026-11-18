@@ -12,6 +12,15 @@ and the weather, tells you on Telegram, and moves today's workout on Google Cale
   skin temp), estimated readiness score (`readiness.go`), Open-Meteo weather, Calendar moves (`move.go`),
   short-workout fallback (`shortworkouts.go`), OAuth incl. renewal from a phone (`authflow.go`).
   Every operation has `-json` output; the bot only talks to the agent through it.
+  `main.go` holds only flag parsing and `main()`. The rest of `cmd/agent`:
+  - `weather.go` - location (env or IP), Open-Meteo fetch, weather factor evaluation.
+  - `googlehealth.go` - Google Health fetching (sleep, tracker worn, steps, resting HR) and `RecoveryData`.
+  - `verdict.go` - severity, factors, recovery evaluation, `BuildAgentReport`, verdicts, report printing.
+  - `calendar.go` - calendar types and API calls, workout title categorization, today's workout lookup.
+  - `reschedule.go` - `RescheduleMissedWorkout`: plan the cascade/supersede, then apply it.
+  - `oauth.go` - core OAuth (config, token storage and refresh, browser flow), used by every command.
+  - `util.go` - shared helpers (`getJSON`, `firstNonEmpty`).
+  - `authflow.go` - only the phone renewal flow (`-auth` / `-auth-code`).
 - `telegram_bot/` (Python, python-telegram-bot) - runs the agent as a subprocess (`services.py`).
 - `configs/short_workouts.json` - hand-maintained YouTube library. Tokens/history live next to the binary
   (`data/` on the server). Docker + `DEPLOY.md` for a VPS.
